@@ -50,3 +50,17 @@ def test_lockfiles_are_not_ignored() -> None:
     gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
     assert "package-lock.json" not in gitignore
     assert "agentcore/cdk/package-lock.json" not in gitignore
+
+
+def test_readme_declares_product_direction_and_baseline_status() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8").lower()
+    assert "web browser" in readme
+    assert "amazon cognito" in readme
+    assert "baseline" in readme
+    assert "no aws resources" in readme
+
+
+def test_verification_entrypoint_exists_and_is_executable() -> None:
+    verifier = ROOT / "scripts" / "verify.sh"
+    assert verifier.is_file()
+    assert verifier.stat().st_mode & 0o111
