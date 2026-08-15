@@ -7,7 +7,6 @@ authentication for the Hermes AgentCore deployment.
 from __future__ import annotations
 
 from aws_cdk import (
-    Duration,
     RemovalPolicy,
     Stack,
     aws_cognito as cognito,
@@ -80,18 +79,7 @@ class HermesSecurityStack(Stack):
             removal_policy=RemovalPolicy.RETAIN,
         )
 
-        self.user_pool_client = self.user_pool.add_client(
-            "WebClient",
-            auth_flows=cognito.AuthFlow(user_srp=True),
-            id_token_validity=Duration.hours(8),
-        )
-
         # ---- Outputs -----------------------------------------------------
 
         CfnOutput(self, "KmsKeyArn", value=self.kms_key.key_arn)
         CfnOutput(self, "UserPoolId", value=self.user_pool.user_pool_id)
-        CfnOutput(
-            self,
-            "UserPoolClientId",
-            value=self.user_pool_client.user_pool_client_id,
-        )

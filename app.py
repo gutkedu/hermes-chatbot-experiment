@@ -21,6 +21,7 @@ from stacks.router_stack import HermesRouterStack
 from stacks.cron_stack import HermesCronStack
 from stacks.token_monitoring_stack import HermesTokenMonitoringStack
 from stacks.gateway_stack import HermesGatewayStack
+from stacks.web_stack import HermesWebStack
 
 app = cdk.App()
 
@@ -96,5 +97,20 @@ gateway_stack = HermesGatewayStack(
     agentcore_qualifier=agentcore_qualifier,
 )
 gateway_stack.add_dependency(vpc_stack)
+
+# --------------------------------------------------------------------------
+# Phase 3 web stack (authenticated browser chat)
+# --------------------------------------------------------------------------
+
+web_stack = HermesWebStack(
+    app,
+    f"{project}-web",
+    user_pool_id=security_stack.user_pool.user_pool_id,
+    user_pool_arn=security_stack.user_pool.user_pool_arn,
+    agentcore_runtime_arn=agentcore_runtime_arn,
+    agentcore_qualifier=agentcore_qualifier,
+)
+web_stack.add_dependency(security_stack)
+web_stack.add_dependency(agentcore_stack)
 
 app.synth()
