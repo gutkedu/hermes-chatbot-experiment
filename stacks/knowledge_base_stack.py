@@ -42,7 +42,7 @@ class HermesKnowledgeBaseStack(Stack):
             self,
             "VectorBucket",
             type="AWS::S3Vectors::VectorBucket",
-            properties={"VectorBucketName": f"{project}-knowledge-vectors-{account}-{region}".lower()},
+            properties={},
         )
         self.vector_bucket.cfn_options.deletion_policy = CfnDeletionPolicy.RETAIN
         self.vector_bucket.cfn_options.update_replace_policy = CfnDeletionPolicy.RETAIN
@@ -73,23 +73,39 @@ class HermesKnowledgeBaseStack(Stack):
                 },
             ),
         )
-        self.document_bucket.grant_read(self.knowledge_base_role)
         embedding_model_arn = Stack.of(self).format_arn(
             service="bedrock", region=region, account="", resource="foundation-model/amazon.titan-embed-text-v2:0"
         )
-        self.knowledge_base_role.add_to_policy(iam.PolicyStatement(
-            sid="InvokeTitanEmbeddingModel",
-            actions=["bedrock:InvokeModel"],
-            resources=[embedding_model_arn],
-        ))
-        self.knowledge_base_role.add_to_policy(iam.PolicyStatement(
-            sid="AccessOnlyThisS3VectorIndex",
-            actions=[
-                "s3vectors:PutVectors", "s3vectors:GetVectors", "s3vectors:DeleteVectors",
-                "s3vectors:QueryVectors", "s3vectors:GetIndex",
+        knowledge_base_policy = iam.Policy(
+            self,
+            "KnowledgeBaseAccessPolicy",
+            roles=[self.knowledge_base_role],
+            statements=[
+                iam.PolicyStatement(
+                    sid="ReadOnlyProductDocuments",
+                    actions=["s3:GetObject"],
+                    resources=[self.document_bucket.arn_for_objects("*")],
+                ),
+                iam.PolicyStatement(
+                    sid="ListProductDocuments",
+                    actions=["s3:ListBucket"],
+                    resources=[self.document_bucket.bucket_arn],
+                ),
+                iam.PolicyStatement(
+                    sid="InvokeTitanEmbeddingModel",
+                    actions=["bedrock:InvokeModel"],
+                    resources=[embedding_model_arn],
+                ),
+                iam.PolicyStatement(
+                    sid="AccessOnlyThisS3VectorIndex",
+                    actions=[
+                        "s3vectors:PutVectors", "s3vectors:GetVectors", "s3vectors:DeleteVectors",
+                        "s3vectors:QueryVectors", "s3vectors:GetIndex",
+                    ],
+                    resources=[self.vector_index.ref],
+                ),
             ],
-            resources=[self.vector_index.ref],
-        ))
+        )
 
         self.knowledge_base = CfnResource(
             self,
@@ -109,14 +125,13 @@ class HermesKnowledgeBaseStack(Stack):
                 "StorageConfiguration": {
                     "Type": "S3_VECTORS",
                     "S3VectorsConfiguration": {
-                        "VectorBucketArn": self.vector_bucket.ref,
                         "IndexArn": self.vector_index.ref,
-                        "IndexName": "hermes-product-support",
                     },
                 },
             },
         )
         self.knowledge_base.add_dependency(self.vector_index)
+        self.knowledge_base.add_dependency(knowledge_base_policy.node.default_child)
         self.data_source = CfnResource(
             self,
             "ProductDocumentsDataSource",

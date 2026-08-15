@@ -79,7 +79,7 @@ if context_bool("enable_router"):
         f"{project}-router",
         execution_role_arn=agentcore_stack.execution_role.role_arn,
         bucket_name=agentcore_stack.bucket.bucket_name,
-        agentcore_runtime_arn=runtime_stack.runtime.ref,
+        agentcore_runtime_arn=runtime_stack.runtime.get_att("AgentRuntimeArn").to_string(),
         agentcore_qualifier="DEFAULT",
     )
     router_stack.add_dependency(agentcore_stack)
@@ -88,7 +88,7 @@ if context_bool("enable_cron"):
     HermesCronStack(
         app,
         f"{project}-cron",
-        agentcore_runtime_arn=runtime_stack.runtime.ref,
+        agentcore_runtime_arn=runtime_stack.runtime.get_att("AgentRuntimeArn").to_string(),
         agentcore_qualifier="DEFAULT",
     )
 
@@ -113,7 +113,7 @@ web_stack = HermesWebStack(
     f"{project}-web",
     user_pool_id=security_stack.user_pool.user_pool_id,
     user_pool_arn=security_stack.user_pool.user_pool_arn,
-    agentcore_runtime_arn=runtime_stack.runtime.ref,
+    agentcore_runtime_arn=runtime_stack.runtime.get_att("AgentRuntimeArn").to_string(),
     agentcore_qualifier="DEFAULT",
 )
 web_stack.add_dependency(security_stack)

@@ -4,6 +4,7 @@ set -euo pipefail
 
 project_name="${PROJECT_NAME:-hermes-agentcore}"
 region="${AWS_DEFAULT_REGION:-${AWS_REGION:-us-east-1}}"
+export AWS_PROFILE="${AWS_PROFILE:-gutkedu}"
 export AWS_DEFAULT_REGION="$region"
 
 output() {

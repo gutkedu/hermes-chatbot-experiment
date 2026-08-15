@@ -127,7 +127,7 @@ echo "  - Cognito:  ${PROJECT_NAME}-users"
 echo ""
 info "Legacy retained resources to delete:"
 echo "  - S3:       ${PROJECT_NAME}-user-files-${ACCOUNT}-${REGION}"
-echo "  - S3 Vectors: ${PROJECT_NAME}-knowledge-vectors-${ACCOUNT}-${REGION} / hermes-product-support"
+echo "  - S3 Vectors: inspect the KnowledgeBase stack output before manual cleanup"
 echo "  - DynamoDB: ${PROJECT_NAME}-identity"
 echo "  - KMS:      alias/${PROJECT_NAME}"
 echo ""
@@ -246,16 +246,8 @@ fi
 # 4b. S3 Vectors — delete the index before its vector bucket. These are
 # retained by CloudFormation because a non-empty vector bucket cannot be
 # deleted by the service during stack deletion.
-VECTOR_BUCKET="${PROJECT_NAME}-knowledge-vectors-${ACCOUNT}-${REGION}"
-VECTOR_INDEX="hermes-product-support"
-if aws s3vectors get-index --vector-bucket-name "$VECTOR_BUCKET" --index-name "$VECTOR_INDEX" >/dev/null 2>&1; then
-    info "Deleting S3 Vectors index: $VECTOR_BUCKET/$VECTOR_INDEX"
-    aws s3vectors delete-index --vector-bucket-name "$VECTOR_BUCKET" --index-name "$VECTOR_INDEX"
-fi
-if aws s3vectors get-vector-bucket --vector-bucket-name "$VECTOR_BUCKET" >/dev/null 2>&1; then
-    info "Deleting S3 Vectors bucket: $VECTOR_BUCKET"
-    aws s3vectors delete-vector-bucket --vector-bucket-name "$VECTOR_BUCKET"
-fi
+warn "S3 Vectors resources use a CloudFormation-generated bucket name and are retained."
+warn "Delete its index, then its vector bucket, with the S3 Vectors console after stack teardown."
 
 # 4c. DynamoDB table.
 TABLE="${PROJECT_NAME}-identity"
