@@ -1,6 +1,6 @@
 # Hermes product-support chatbot
 
-Authenticated product-support chatbot built with Hermes Agent on Amazon Bedrock AgentCore. The target channel is a web browser, with Amazon Cognito authentication and a backend boundary between the browser and AgentCore.
+Authenticated product-support chatbot built with Hermes Agent on Amazon Bedrock AgentCore. The target channel is a web browser, with Amazon Cognito authentication and a backend boundary between the browser and AgentCore. The first end-to-end web path is documented in [`docs/authenticated-web-chat-runbook.md`](docs/authenticated-web-chat-runbook.md).
 
 ## Repository status
 
@@ -21,10 +21,14 @@ python3 -m venv .venv
 .venv/bin/python -m pip install --require-hashes -r requirements.lock
 npm ci
 npm --prefix agentcore/cdk ci
+npm ci --prefix lambda/web_chat
 ./scripts/verify.sh
 ```
 
-The verifier runs Python tests, the AgentCore TypeScript tests/build, and `cdk synth`. It does not run `cdk deploy` or `agentcore deploy`.
+The verifier runs the BFF and browser contract tests, Python tests, the
+AgentCore TypeScript tests/build, and `cdk synth`. It does not run `cdk deploy`
+or `agentcore deploy`. For an authorized AWS smoke test after deployment, see
+[`scripts/verify_web_chat.sh`](scripts/verify_web_chat.sh) and the runbook.
 
 ## Design
 

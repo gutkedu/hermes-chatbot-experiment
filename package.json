@@ -4,7 +4,9 @@
   "private": true,
   "description": "Authenticated product-support chatbot built with Hermes Agent and Amazon Bedrock AgentCore",
   "scripts": {
-    "cdk:synth": "cdk synth --app '.venv/bin/python app.py'"
+    "cdk:synth": "cdk synth --app '.venv/bin/python app.py'",
+    "test:bff": "npm --prefix lambda/web_chat test",
+    "test:web": "node --test web/tests/*.test.mjs"
   },
   "license": "MIT",
   "dependencies": {
