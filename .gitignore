@@ -29,7 +29,6 @@ Thumbs.db
 
 # Node
 node_modules/
-package-lock.json
 
 # AgentCore toolkit
 .bedrock_agentcore/
@@ -38,7 +37,6 @@ package-lock.json
 agentcore/.cli/
 agentcore/aws-targets.json
 agentcore/cdk/node_modules/
-agentcore/cdk/package-lock.json
 agentcore/cdk/cdk.out/
 agentcore/cdk/dist/
 
