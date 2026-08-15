@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hermes Support</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="header">
+        <div>
+          <p class="eyebrow">Hermes support</p>
+          <h1>Ask about your product</h1>
+        </div>
+        <div class="account-actions">
+          <button id="sign-in" class="button button-primary" type="button">Sign in</button>
+          <button id="sign-out" class="button button-quiet" type="button" hidden>Sign out</button>
+        </div>
+      </header>
+
+      <section id="status" class="status" aria-live="polite">Sign in to start a conversation.</section>
+      <section id="messages" class="messages" aria-label="Conversation"></section>
+
+      <form id="chat-form" class="composer" hidden>
+        <label class="sr-only" for="message">Message</label>
+        <textarea id="message" rows="3" maxlength="8000" placeholder="Describe what you need help with…" required></textarea>
+        <div class="composer-footer">
+          <span id="error" class="error" role="alert"></span>
+          <button id="send" class="button button-primary" type="submit">Send</button>
+          <button id="retry" class="button button-secondary" type="button" hidden>Retry</button>
+        </div>
+      </form>
+    </main>
+    <script src="/runtime-config.js"></script>
+    <script type="module" src="/app.mjs"></script>
+  </body>
+</html>
