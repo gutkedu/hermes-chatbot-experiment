@@ -67,6 +67,7 @@ anthropic.Anthropic = _PatchedAnthropic  # type: ignore[misc]
 # ---------------------------------------------------------------------------
 
 from bedrock_agentcore.runtime import BedrockAgentCoreApp  # noqa: E402
+from bridge.streaming import stream_conversation  # noqa: E402
 
 logger = logging.getLogger("hermes.agentcore")
 app = BedrockAgentCoreApp()
@@ -153,12 +154,13 @@ async def invoke(payload, context):
         # agent has context from previous turns.
         history = payload.get("conversationHistory") or None
 
-        result = agent.run_conversation(
+        async for delta in stream_conversation(
+            agent,
             user_message=message,
             system_message=system_extra,
             conversation_history=history,
-        )
-        yield result.get("final_response", "")
+        ):
+            yield delta
     except Exception as exc:
         log.error("Agent error: %s\n%s", exc, traceback.format_exc())
         yield f"Sorry, an error occurred: {exc}"

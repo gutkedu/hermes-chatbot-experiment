@@ -9,7 +9,7 @@
 #
 # Destruction order (reverse of deploy):
 #   1. Phase 4 CDK stack   (ECS gateway — WeChat + Feishu)
-#   2. Phase 3 CDK stacks  (router, cron, token-monitoring)
+#   2. Phase 3 CDK stacks  (web, router, cron, token-monitoring)
 #   3. Phase 2 AgentCore   (AgentCore-hermes-default stack + runtime)
 #   4. Phase 1 CDK stacks  (observability, agentcore, guardrails, security, vpc)
 #   5. Retained resources   (S3, DynamoDB, KMS, Cognito — skipped by cdk destroy)
@@ -97,6 +97,7 @@ echo ""
 info "CloudFormation stacks to destroy:"
 for STACK in \
     "${PROJECT_NAME}-gateway" \
+    "${PROJECT_NAME}-web" \
     "${PROJECT_NAME}-token-monitoring" \
     "${PROJECT_NAME}-cron" \
     "${PROJECT_NAME}-router" \
@@ -154,9 +155,10 @@ fi
 # Step 2: Destroy Phase 3 CDK stacks
 # --------------------------------------------------------------------------
 
-step "2/5  Destroying Phase 3 stacks (router, cron, token-monitoring) …"
+step "2/5  Destroying Phase 3 stacks (web, router, cron, token-monitoring) …"
 
 $CDK destroy \
+    "${PROJECT_NAME}-web" \
     "${PROJECT_NAME}-token-monitoring" \
     "${PROJECT_NAME}-cron" \
     "${PROJECT_NAME}-router" \

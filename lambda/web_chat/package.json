@@ -1,0 +1,14 @@
+{
+  "name": "hermes-web-chat-bff",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@aws-sdk/client-bedrock-agentcore": "3.1111.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}

@@ -167,13 +167,18 @@ phase3() {
         warn "Run Phase 2 first, or set the values manually."
     fi
 
+    # Stage the BFF's production dependency tree before CDK packages the
+    # Lambda asset. This is intentionally credential-free and deterministic.
+    npm ci --omit=dev --prefix "$PROJECT_DIR/lambda/web_chat"
+
     $CDK deploy \
         "${PROJECT_NAME}-router" \
         "${PROJECT_NAME}-cron" \
         "${PROJECT_NAME}-token-monitoring" \
+        "${PROJECT_NAME}-web" \
         --require-approval never
 
-    # Print API URL.
+    # Print API and browser URLs without exposing tokens or runtime state.
     API_URL=$(aws cloudformation describe-stacks \
         --stack-name "${PROJECT_NAME}-router" \
         --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" \
@@ -186,6 +191,27 @@ phase3() {
         info "  Slack:    ${API_URL}webhook/slack"
         info "  Discord:  ${API_URL}webhook/discord"
     fi
+
+    WEB_SITE_URL=$(aws cloudformation describe-stacks \
+        --stack-name "${PROJECT_NAME}-web" \
+        --query "Stacks[0].Outputs[?OutputKey=='SiteUrl'].OutputValue" \
+        --output text 2>/dev/null || echo "")
+    WEB_API_URL=$(aws cloudformation describe-stacks \
+        --stack-name "${PROJECT_NAME}-web" \
+        --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" \
+        --output text 2>/dev/null || echo "")
+    COGNITO_DOMAIN=$(aws cloudformation describe-stacks \
+        --stack-name "${PROJECT_NAME}-web" \
+        --query "Stacks[0].Outputs[?OutputKey=='CognitoDomain'].OutputValue" \
+        --output text 2>/dev/null || echo "")
+    USER_POOL_CLIENT_ID=$(aws cloudformation describe-stacks \
+        --stack-name "${PROJECT_NAME}-web" \
+        --query "Stacks[0].Outputs[?OutputKey=='UserPoolClientId'].OutputValue" \
+        --output text 2>/dev/null || echo "")
+    [ -n "$WEB_SITE_URL" ] && info "Web chat site: $WEB_SITE_URL"
+    [ -n "$WEB_API_URL" ] && info "Web chat API: $WEB_API_URL"
+    [ -n "$COGNITO_DOMAIN" ] && info "Cognito domain: $COGNITO_DOMAIN"
+    [ -n "$USER_POOL_CLIENT_ID" ] && info "Web client ID: $USER_POOL_CLIENT_ID"
 
     info "Phase 3 complete."
 }
