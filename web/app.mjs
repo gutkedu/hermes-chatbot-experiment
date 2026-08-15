@@ -8,6 +8,7 @@ import {
   storePkceVerifier,
   storeTokens,
 } from './src/auth.mjs';
+import { shouldSubmitOnEnter } from './src/keyboard.mjs';
 import { parseSse } from './src/sse.mjs';
 import { initialState, reduce } from './src/state.mjs';
 
@@ -133,6 +134,11 @@ elements.form.addEventListener('submit', (event) => {
   if (!message || state.status === 'sending' || state.status === 'streaming') return;
   elements.input.value = '';
   sendMessage(message);
+});
+elements.input.addEventListener('keydown', (event) => {
+  if (!shouldSubmitOnEnter(event)) return;
+  event.preventDefault();
+  elements.form.requestSubmit();
 });
 elements.retry.addEventListener('click', () => sendMessage(state.pendingMessage, true));
 

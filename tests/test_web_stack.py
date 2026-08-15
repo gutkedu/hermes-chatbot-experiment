@@ -41,6 +41,15 @@ def test_web_stack_has_chat_scope_and_cognito_client():
     )
 
 
+def test_cognito_domain_uses_cloudformation_pseudo_parameters():
+    template = _template()
+    domain = template.to_json()["Resources"]["UserPoolDomain"]["Properties"]["Domain"]
+
+    assert domain == {
+        "Fn::Sub": "hermes-test-${AWS::AccountId}-${AWS::Region}",
+    }
+
+
 def test_rest_api_uses_response_streaming_lambda_proxy():
     template = _template()
     resources = template.find_resources("AWS::ApiGateway::RestApi")
@@ -48,6 +57,16 @@ def test_rest_api_uses_response_streaming_lambda_proxy():
     assert "response-streaming-invocations" in serialized
     assert '"responseTransferMode": "STREAM"' in serialized
     assert '"chat/send"' in serialized
+
+
+def test_cors_preflight_declares_headers_for_api_gateway_mapping():
+    operation = HermesWebStack._options_operation("https://example.com")
+
+    assert set(operation["responses"]["204"]["headers"]) == {
+        "Access-Control-Allow-Origin",
+        "Access-Control-Allow-Headers",
+        "Access-Control-Allow-Methods",
+    }
 
 
 def test_web_stack_has_private_site_and_scoped_agentcore_permission():

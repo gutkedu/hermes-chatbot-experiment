@@ -1,66 +1,23 @@
-"""Security stack — KMS, Secrets Manager, Cognito.
+"""Security stack — Cognito.
 
-Provides the encryption key, secret storage, and (optional) user-pool
-authentication for the Hermes AgentCore deployment.
+Provides the user-pool authentication used by the web-only deployment.
 """
 
 from __future__ import annotations
 
-from aws_cdk import (
-    RemovalPolicy,
-    Stack,
-    aws_cognito as cognito,
-    aws_kms as kms,
-    aws_secretsmanager as sm,
-    CfnOutput,
-)
+from aws_cdk import RemovalPolicy, Stack, aws_cognito as cognito, CfnOutput
 from constructs import Construct
 
 
 class HermesSecurityStack(Stack):
-    """KMS CMK, Secrets Manager secrets, Cognito user pool."""
+    """Cognito user pool for the authenticated web application."""
 
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
         project = self.node.try_get_context("project_name") or "hermes-agentcore"
 
-        # ---- KMS ----------------------------------------------------------
-
-        self.kms_key = kms.Key(
-            self,
-            "Key",
-            alias=f"alias/{project}",
-            description=f"Encryption key for {project}",
-            enable_key_rotation=True,
-            removal_policy=RemovalPolicy.RETAIN,
-        )
-
-        # ---- Secrets Manager (placeholders — real values set by operator) -
-
-        secret_names = [
-            "telegram-bot-token",
-            "slack-bot-token",
-            "slack-signing-secret",
-            "discord-bot-token",
-            "discord-public-key",
-            "feishu-app-id",
-            "feishu-app-secret",
-            "feishu-encrypt-key",
-            "openai-api-key",
-            "openrouter-api-key",
-        ]
-        self.secrets: dict[str, sm.Secret] = {}
-        for name in secret_names:
-            self.secrets[name] = sm.Secret(
-                self,
-                name.replace("-", "_").title().replace("_", ""),
-                secret_name=f"hermes/{name}",
-                description=f"Hermes AgentCore — {name}",
-                encryption_key=self.kms_key,
-            )
-
-        # ---- Cognito (optional — for web UI auth) ------------------------
+        # ---- Cognito ------------------------------------------------------
 
         self.user_pool = cognito.UserPool(
             self,
@@ -81,5 +38,4 @@ class HermesSecurityStack(Stack):
 
         # ---- Outputs -----------------------------------------------------
 
-        CfnOutput(self, "KmsKeyArn", value=self.kms_key.key_arn)
         CfnOutput(self, "UserPoolId", value=self.user_pool.user_pool_id)

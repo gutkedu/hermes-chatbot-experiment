@@ -245,9 +245,12 @@ def _init_full_agent() -> None:
 
         from run_agent import AIAgent  # noqa: WPS433
 
-        model = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-sonnet-4-6-v1")
-        provider = os.environ.get("HERMES_PROVIDER", "anthropic")
-        base_url = os.environ.get("HERMES_BASE_URL", "")
+        from bridge.model_config import resolve_bedrock_settings
+
+        settings = resolve_bedrock_settings()
+        model = settings["model"]
+        provider = os.environ.get("HERMES_PROVIDER", settings["provider"])
+        base_url = os.environ.get("HERMES_BASE_URL", settings["base_url"])
 
         kwargs: dict[str, Any] = {
             "model": model,

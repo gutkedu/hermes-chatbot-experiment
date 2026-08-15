@@ -21,6 +21,8 @@ from __future__ import annotations
 import logging
 import os
 
+from bridge.model_config import resolve_bedrock_model
+
 logger = logging.getLogger("agentcore.bedrock_provider")
 
 # ---- Model mapping -------------------------------------------------------
@@ -58,7 +60,7 @@ def configure_bedrock() -> None:
     """
     # litellm reads AWS credentials from the IAM role attached to the
     # AgentCore runtime — no explicit keys needed.
-    default_model = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-sonnet-4-6-v1")
+    default_model = resolve_bedrock_model()
     os.environ.setdefault("LITELLM_MODEL", f"bedrock/{default_model}")
 
     # Suppress litellm telemetry in production.

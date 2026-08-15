@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # --------------------------------------------------------------------------
-# Teardown script — destroy ALL resources created by deploy.sh.
+# Teardown script — destroy web-only resources and any legacy optional stacks.
 #
 # Usage:
 #   ./scripts/teardown.sh              # Interactive (prompt before each step)
@@ -8,11 +8,12 @@
 #   ./scripts/teardown.sh --dry-run    # Show what would be destroyed
 #
 # Destruction order (reverse of deploy):
-#   1. Phase 4 CDK stack   (ECS gateway — WeChat + Feishu)
-#   2. Phase 3 CDK stacks  (web, router, cron, token-monitoring)
-#   3. Phase 2 AgentCore   (AgentCore-hermes-default stack + runtime)
-#   4. Phase 1 CDK stacks  (observability, agentcore, guardrails, security, vpc)
-#   5. Retained resources   (S3, DynamoDB, KMS, Cognito — skipped by cdk destroy)
+#   1. CDK stacks (web plus any legacy optional stacks)
+#   2. AgentCore runtime (AgentCore-hermes-default stack)
+#   3. Base CDK stacks (agentcore and security)
+#   4. Legacy retained resources (S3, DynamoDB, KMS, secrets)
+#
+# The Cognito user pool is intentionally preserved.
 # --------------------------------------------------------------------------
 set -euo pipefail
 
@@ -22,6 +23,11 @@ cd "$PROJECT_DIR"
 
 MODE="${1:-interactive}"
 PROJECT_NAME="hermes-agentcore"
+
+export AWS_PROFILE="${AWS_PROFILE:-gutkedu}"
+if [ -z "${AWS_DEFAULT_REGION:-}" ]; then
+    export AWS_DEFAULT_REGION="${AWS_REGION:-us-east-1}"
+fi
 
 # Activate virtual environment if present.
 if [ -f "$PROJECT_DIR/.venv/bin/activate" ]; then
@@ -61,7 +67,7 @@ case "$MODE" in
         ;;
 esac
 
-REGION=$(aws configure get region 2>/dev/null || echo "us-west-2")
+REGION="${AWS_DEFAULT_REGION}"
 ACCOUNT=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || echo "unknown")
 
 # --------------------------------------------------------------------------
@@ -115,11 +121,13 @@ for STACK in \
 done
 
 echo ""
-info "Retained resources to delete manually:"
+info "Resources preserved by this teardown:"
+echo "  - Cognito:  ${PROJECT_NAME}-users"
+echo ""
+info "Legacy retained resources to delete:"
 echo "  - S3:       ${PROJECT_NAME}-user-files-${ACCOUNT}-${REGION}"
 echo "  - DynamoDB: ${PROJECT_NAME}-identity"
 echo "  - KMS:      alias/${PROJECT_NAME}"
-echo "  - Cognito:  ${PROJECT_NAME}-users"
 echo ""
 
 if $DRY_RUN; then
@@ -138,17 +146,17 @@ if ! $FORCE; then
 fi
 
 # --------------------------------------------------------------------------
-# Step 1: Destroy Phase 4 CDK stack (ECS Gateway)
+# Step 1: Destroy legacy ECS gateway stack, if present
 # --------------------------------------------------------------------------
 
-step "1/5  Destroying Phase 4 stack (ECS gateway) …"
+step "1/5  Destroying legacy ECS gateway stack …"
 
 if stack_exists "${PROJECT_NAME}-gateway"; then
     $CDK destroy "${PROJECT_NAME}-gateway" --force 2>/dev/null \
-        || warn "Phase 4 gateway stack may have already been deleted."
-    info "Phase 4 gateway stack destroyed."
+        || warn "Legacy gateway stack may have already been deleted."
+    info "Legacy gateway stack destroyed."
 else
-    info "Phase 4 gateway stack not deployed — skipping."
+    info "Legacy gateway stack not deployed — skipping."
 fi
 
 # --------------------------------------------------------------------------
@@ -266,22 +274,7 @@ else
     info "KMS key $KMS_ALIAS does not exist."
 fi
 
-# 4d. Cognito user pool.
-POOL_ID=$(aws cognito-idp list-user-pools --max-results 50 --query "UserPools[?Name=='${PROJECT_NAME}-users'].Id" --output text 2>/dev/null || echo "")
-if [ -n "$POOL_ID" ] && [ "$POOL_ID" != "None" ]; then
-    # Must delete the domain first if one exists.
-    DOMAIN=$(aws cognito-idp describe-user-pool --user-pool-id "$POOL_ID" --query "UserPool.Domain" --output text 2>/dev/null || echo "")
-    if [ -n "$DOMAIN" ] && [ "$DOMAIN" != "None" ]; then
-        aws cognito-idp delete-user-pool-domain --user-pool-id "$POOL_ID" --domain "$DOMAIN" 2>/dev/null || true
-    fi
-    info "Deleting Cognito user pool: $POOL_ID"
-    aws cognito-idp delete-user-pool --user-pool-id "$POOL_ID" 2>/dev/null \
-        || warn "Could not delete Cognito user pool."
-else
-    info "Cognito user pool ${PROJECT_NAME}-users does not exist."
-fi
-
-# 4e. Secrets Manager — force delete (no recovery).
+# 4d. Secrets Manager — force delete (no recovery).
 info "Deleting Secrets Manager secrets (hermes/*) …"
 SECRETS=$(aws secretsmanager list-secrets --query "SecretList[?starts_with(Name, 'hermes/')].Name" --output text 2>/dev/null || echo "")
 if [ -n "$SECRETS" ]; then

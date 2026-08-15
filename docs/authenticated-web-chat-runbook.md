@@ -19,9 +19,9 @@ authorized-environment check.
    ./scripts/deploy.sh phase3
    ```
 
-   Phase 3 deploys the `hermes-agentcore-web` stack alongside the existing
-   channel stacks. It prints the CloudFront site URL, streaming API URL,
-   Cognito domain, and public web client ID.
+   Phase 3 deploys only the `hermes-agentcore-web` stack. It prints the
+   CloudFront site URL, streaming API URL, Cognito domain, and public web
+   client ID.
 3. Create two test users in the retained user pool. The pool ID is the
    `UserPoolId` output of `hermes-agentcore-security`:
 
@@ -89,6 +89,6 @@ When the demonstration is complete, run the interactive teardown (or
 ```
 
 The destroyable web bucket, CloudFront distribution, API, Lambda, and Hosted UI
-resources are removed with `hermes-agentcore-web`. The Cognito user pool and
-foundation KMS resources use `RETAIN`; delete those explicitly only after
-confirming that no other environment uses them.
+resources are removed with `hermes-agentcore-web`. The Cognito user pool is
+retained so it can be reused by the web application. The web-only deployment
+does not create a dedicated KMS key or channel secrets.

@@ -12,6 +12,8 @@ from typing import Any
 
 import boto3
 
+from bridge.model_config import resolve_bedrock_model
+
 logger = logging.getLogger("agentcore.warmup")
 
 SYSTEM_PROMPT = """\
@@ -32,10 +34,7 @@ class WarmupAgent:
 
     def __init__(self) -> None:
         self.bedrock = boto3.client("bedrock-runtime")
-        self.model_id = os.environ.get(
-            "WARMUP_MODEL_ID",
-            os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-sonnet-4-6-v1"),
-        )
+        self.model_id = os.environ.get("WARMUP_MODEL_ID", resolve_bedrock_model())
         logger.info("WarmupAgent initialised (model=%s)", self.model_id)
 
     def handle(self, message: str, user_id: str) -> str:

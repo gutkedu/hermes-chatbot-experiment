@@ -86,8 +86,8 @@ export async function invokeAgentCore(client, input) {
     agentRuntimeArn: input.agentRuntimeArn,
     runtimeSessionId: input.runtimeSessionId,
     runtimeUserId: input.runtimeUserId,
-    qualifier: input.qualifier,
     payload: Buffer.from(JSON.stringify(input.payload), 'utf8'),
   };
+  if (input.qualifier) commandInput.qualifier = input.qualifier;
   return client.send(new InvokeAgentRuntimeCommand(commandInput));
 }

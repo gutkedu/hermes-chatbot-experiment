@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """CDK app entry point for Hermes-Agent on Amazon Bedrock AgentCore.
 
-Instantiates all stacks in dependency order.  Stacks are split into
-**Phase 1** (foundation — no runtime IDs needed) and **Phase 3** (dependent
-— need runtime IDs from the AgentCore Starter Toolkit).
+Instantiates the web-only stacks in dependency order.  The AgentCore runtime
+is deployed separately by the AgentCore Starter Toolkit between the base and
+web stacks.
 
-Phase 2 (``agentcore deploy``) runs outside CDK.
+Router, cron, observability, token monitoring, and guardrails remain
+available as opt-in stacks through CDK context flags, but are disabled by
+default.
 """
 
 from __future__ import annotations
 
 import aws_cdk as cdk
 
-from stacks.vpc_stack import HermesVpcStack
 from stacks.security_stack import HermesSecurityStack
 from stacks.guardrails_stack import HermesGuardrailsStack
 from stacks.agentcore_stack import HermesAgentCoreStack
@@ -20,10 +21,17 @@ from stacks.observability_stack import HermesObservabilityStack
 from stacks.router_stack import HermesRouterStack
 from stacks.cron_stack import HermesCronStack
 from stacks.token_monitoring_stack import HermesTokenMonitoringStack
-from stacks.gateway_stack import HermesGatewayStack
 from stacks.web_stack import HermesWebStack
 
 app = cdk.App()
+
+
+def context_bool(key: str, default: bool = False) -> bool:
+    value = app.node.try_get_context(key)
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
 
 project = app.node.try_get_context("project_name") or "hermes-agentcore"
 
@@ -33,70 +41,60 @@ agentcore_qualifier = app.node.try_get_context("agentcore_qualifier") or ""
 alarm_email = app.node.try_get_context("alarm_email") or ""
 
 # --------------------------------------------------------------------------
-# Phase 1 stacks (no runtime IDs required)
+# Base stacks (no runtime IDs required)
 # --------------------------------------------------------------------------
-
-vpc_stack = HermesVpcStack(app, f"{project}-vpc")
 
 security_stack = HermesSecurityStack(app, f"{project}-security")
 
-guardrails_stack = HermesGuardrailsStack(app, f"{project}-guardrails")
+if context_bool("enable_guardrails"):
+    HermesGuardrailsStack(app, f"{project}-guardrails")
 
 agentcore_stack = HermesAgentCoreStack(
     app,
     f"{project}-agentcore",
-    vpc=vpc_stack.vpc,
-    kms_key_arn=security_stack.kms_key.key_arn,
-)
-agentcore_stack.add_dependency(vpc_stack)
-agentcore_stack.add_dependency(security_stack)
-
-observability_stack = HermesObservabilityStack(
-    app,
-    f"{project}-observability",
-    alarm_email=alarm_email,
 )
 
-# --------------------------------------------------------------------------
-# Phase 3 stacks (need runtime IDs from Phase 2)
-# --------------------------------------------------------------------------
+enable_token_monitoring = context_bool("enable_token_monitoring")
+enable_observability = enable_token_monitoring or context_bool("enable_observability")
 
-router_stack = HermesRouterStack(
-    app,
-    f"{project}-router",
-    execution_role_arn=agentcore_stack.execution_role.role_arn,
-    bucket_name=agentcore_stack.bucket.bucket_name,
-    agentcore_runtime_arn=agentcore_runtime_arn,
-    agentcore_qualifier=agentcore_qualifier,
-)
-router_stack.add_dependency(agentcore_stack)
+observability_stack = None
+if enable_observability:
+    observability_stack = HermesObservabilityStack(
+        app,
+        f"{project}-observability",
+        alarm_email=alarm_email,
+    )
 
-cron_stack = HermesCronStack(
-    app,
-    f"{project}-cron",
-    agentcore_runtime_arn=agentcore_runtime_arn,
-    agentcore_qualifier=agentcore_qualifier,
-)
+if context_bool("enable_router"):
+    router_stack = HermesRouterStack(
+        app,
+        f"{project}-router",
+        execution_role_arn=agentcore_stack.execution_role.role_arn,
+        bucket_name=agentcore_stack.bucket.bucket_name,
+        agentcore_runtime_arn=agentcore_runtime_arn,
+        agentcore_qualifier=agentcore_qualifier,
+    )
+    router_stack.add_dependency(agentcore_stack)
 
-token_monitoring_stack = HermesTokenMonitoringStack(
-    app,
-    f"{project}-token-monitoring",
-    alarm_topic_arn=observability_stack.alarm_topic.topic_arn,
-)
-token_monitoring_stack.add_dependency(observability_stack)
+if context_bool("enable_cron"):
+    HermesCronStack(
+        app,
+        f"{project}-cron",
+        agentcore_runtime_arn=agentcore_runtime_arn,
+        agentcore_qualifier=agentcore_qualifier,
+    )
 
-# --------------------------------------------------------------------------
-# Phase 4 stack (optional — ECS Gateway for WeChat + Feishu)
-# --------------------------------------------------------------------------
-
-gateway_stack = HermesGatewayStack(
-    app,
-    f"{project}-gateway",
-    vpc=vpc_stack.vpc,
-    agentcore_runtime_arn=agentcore_runtime_arn,
-    agentcore_qualifier=agentcore_qualifier,
-)
-gateway_stack.add_dependency(vpc_stack)
+if enable_token_monitoring:
+    alarm_topic_arn = (
+        observability_stack.alarm_topic.topic_arn
+        if observability_stack is not None
+        else ""
+    )
+    HermesTokenMonitoringStack(
+        app,
+        f"{project}-token-monitoring",
+        alarm_topic_arn=alarm_topic_arn,
+    )
 
 # --------------------------------------------------------------------------
 # Phase 3 web stack (authenticated browser chat)

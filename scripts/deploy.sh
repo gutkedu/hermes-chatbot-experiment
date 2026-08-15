@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # --------------------------------------------------------------------------
-# Three-phase deploy script for Hermes-Agent on Amazon Bedrock AgentCore.
+# Web-only deploy script for Hermes-Agent on Amazon Bedrock AgentCore.
 #
 # Usage:
-#   ./scripts/deploy.sh           # Run all phases
-#   ./scripts/deploy.sh phase1    # CDK foundation stacks only
+#   ./scripts/deploy.sh           # Run base, runtime, and web phases
+#   ./scripts/deploy.sh phase1    # CDK base stacks only
 #   ./scripts/deploy.sh phase2    # AgentCore Toolkit (build + deploy runtime)
-#   ./scripts/deploy.sh phase3    # CDK dependent stacks only
-#   ./scripts/deploy.sh cdk-only  # Phase 1 + Phase 3 (skip runtime build)
+#   ./scripts/deploy.sh phase3    # Web/API stack only
+#   ./scripts/deploy.sh cdk-only  # Base + web (skip runtime build)
 # --------------------------------------------------------------------------
 set -euo pipefail
 
@@ -17,7 +17,13 @@ cd "$PROJECT_DIR"
 
 PHASE="${1:-all}"
 PROJECT_NAME="hermes-agentcore"
-RUNTIME_NAME="hermes_agent"
+
+# Deployment defaults from the web-only rollout plan. Explicit environment
+# values still take precedence for operators using another account/region.
+export AWS_PROFILE="${AWS_PROFILE:-gutkedu}"
+if [ -z "${AWS_DEFAULT_REGION:-}" ]; then
+    export AWS_DEFAULT_REGION="${AWS_REGION:-us-east-1}"
+fi
 
 # Activate virtual environment if present.
 if [ -f "$PROJECT_DIR/.venv/bin/activate" ]; then
@@ -42,11 +48,20 @@ info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 
+resolve_region() {
+    local detected_region
+    detected_region="${AWS_DEFAULT_REGION:-${AWS_REGION:-}}"
+    if [ -z "$detected_region" ]; then
+        detected_region="$(aws configure get region 2>/dev/null || true)"
+    fi
+    printf '%s\n' "${detected_region:-us-east-1}"
+}
+
 # --------------------------------------------------------------------------
-# Phase 1: CDK foundation stacks
+# Phase 1: CDK web-only base stacks
 # --------------------------------------------------------------------------
 phase1() {
-    info "=== Phase 1: CDK Foundation Stacks ==="
+    info "=== Phase 1: CDK Web-only Base Stacks ==="
 
     # Ensure CDK is bootstrapped.
     if ! aws cloudformation describe-stacks --stack-name CDKToolkit &>/dev/null; then
@@ -55,11 +70,8 @@ phase1() {
     fi
 
     $CDK deploy \
-        "${PROJECT_NAME}-vpc" \
-        "${PROJECT_NAME}-security" \
-        "${PROJECT_NAME}-guardrails" \
         "${PROJECT_NAME}-agentcore" \
-        "${PROJECT_NAME}-observability" \
+        "${PROJECT_NAME}-security" \
         --require-approval never
 
     info "Phase 1 complete."
@@ -81,7 +93,7 @@ phase2() {
     if [ ! -f "$PROJECT_DIR/agentcore/aws-targets.json" ]; then
         info "Generating agentcore/aws-targets.json from current AWS credentials …"
         _ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-        _REGION=$(aws configure get region 2>/dev/null || echo "us-west-2")
+        _REGION=$(resolve_region)
         cat > "$PROJECT_DIR/agentcore/aws-targets.json" <<TARGETS
 [
   {
@@ -126,14 +138,13 @@ TARGETS
         .agentRuntimeArn //
         .runtimeArn //
         empty' 2>/dev/null || echo "")
-    # Extract qualifier from the runtime ARN tail (e.g. "hermes_hermes-55EPNeG2QF")
+    # AgentCore qualifiers are endpoint IDs (DEFAULT unless a pinned endpoint is created).
+    # Runtime IDs are not valid qualifiers.
     QUALIFIER=$(echo "$STATUS_JSON" | jq -r '
-        .resources[0].identifier //
-        .runtimes[0].agentRuntimeId //
         .runtimes[0].qualifier //
         .qualifier //
         .endpointId //
-        empty' 2>/dev/null | sed 's|.*/||' || echo "")
+        "DEFAULT"' 2>/dev/null | sed 's|.*/||' || echo "DEFAULT")
 
     if [ -n "$RUNTIME_ARN" ]; then
         info "Runtime ARN:  $RUNTIME_ARN"
@@ -155,10 +166,10 @@ TARGETS
 }
 
 # --------------------------------------------------------------------------
-# Phase 3: CDK dependent stacks
+# Phase 3: CDK web/API stack
 # --------------------------------------------------------------------------
 phase3() {
-    info "=== Phase 3: CDK Dependent Stacks ==="
+    info "=== Phase 3: Web/API Stack ==="
 
     # Verify runtime IDs are set.
     RUNTIME_ARN=$(jq -r '.context.agentcore_runtime_arn // empty' cdk.json)
@@ -171,27 +182,9 @@ phase3() {
     # Lambda asset. This is intentionally credential-free and deterministic.
     npm ci --omit=dev --prefix "$PROJECT_DIR/lambda/web_chat"
 
-    $CDK deploy \
-        "${PROJECT_NAME}-router" \
-        "${PROJECT_NAME}-cron" \
-        "${PROJECT_NAME}-token-monitoring" \
-        "${PROJECT_NAME}-web" \
-        --require-approval never
+    $CDK deploy "${PROJECT_NAME}-web" --require-approval never
 
     # Print API and browser URLs without exposing tokens or runtime state.
-    API_URL=$(aws cloudformation describe-stacks \
-        --stack-name "${PROJECT_NAME}-router" \
-        --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" \
-        --output text 2>/dev/null || echo "")
-
-    if [ -n "$API_URL" ]; then
-        info "API Gateway URL: $API_URL"
-        info "Webhook endpoints:"
-        info "  Telegram: ${API_URL}webhook/telegram"
-        info "  Slack:    ${API_URL}webhook/slack"
-        info "  Discord:  ${API_URL}webhook/discord"
-    fi
-
     WEB_SITE_URL=$(aws cloudformation describe-stacks \
         --stack-name "${PROJECT_NAME}-web" \
         --query "Stacks[0].Outputs[?OutputKey=='SiteUrl'].OutputValue" \
@@ -217,81 +210,6 @@ phase3() {
 }
 
 # --------------------------------------------------------------------------
-# Phase 4: ECS Gateway for WeChat + Feishu (optional)
-# --------------------------------------------------------------------------
-phase4() {
-    info "=== Phase 4: ECS Gateway (WeChat + Feishu) ==="
-
-    # Verify runtime ARN is set.
-    RUNTIME_ARN=$(jq -r '.context.agentcore_runtime_arn // empty' cdk.json)
-    if [ -z "$RUNTIME_ARN" ]; then
-        error "agentcore_runtime_arn not set in cdk.json. Run Phase 2 first."
-        exit 1
-    fi
-
-    AWS_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-    AWS_REGION=$(aws configure get region 2>/dev/null || echo "us-west-2")
-    ECR_REPO="${PROJECT_NAME}-gateway"
-    ECR_URI="${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}"
-
-    # ── Step 1: Ensure ECR repo exists (create before CDK to push image first) ──
-    if ! aws ecr describe-repositories --repository-names "$ECR_REPO" &>/dev/null; then
-        info "Creating ECR repository: $ECR_REPO"
-        aws ecr create-repository \
-            --repository-name "$ECR_REPO" \
-            --image-scanning-configuration scanOnPush=true \
-            --no-cli-pager >/dev/null
-    fi
-
-    # ── Step 2: Copy hermes-agent source into build context ──
-    if [ ! -d "$PROJECT_DIR/gateway/hermes-agent" ]; then
-        if [ ! -d "$HOME/hermes-agent" ]; then
-            info "hermes-agent not found at $HOME/hermes-agent — cloning …"
-            git clone https://github.com/NousResearch/hermes-agent.git "$HOME/hermes-agent"
-        fi
-        info "Copying hermes-agent source into gateway/ for Docker build …"
-        rsync -a --exclude='.git' --exclude='node_modules' --exclude='__pycache__' \
-            "$HOME/hermes-agent/" "$PROJECT_DIR/gateway/hermes-agent/"
-    fi
-
-    # ── Step 3: Build and push container image ──
-    info "ECR login …"
-    aws ecr get-login-password --region "$AWS_REGION" | \
-        docker login --username AWS --password-stdin "${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-
-    info "Building gateway container image …"
-    docker build \
-        --platform linux/amd64 \
-        -t "${ECR_URI}:latest" \
-        -f "$PROJECT_DIR/gateway/Dockerfile" \
-        "$PROJECT_DIR/gateway/"
-
-    info "Pushing to ECR …"
-    docker push "${ECR_URI}:latest"
-
-    # ── Step 4: CDK deploy (image is already in ECR, Service can start) ──
-    info "Deploying CDK gateway stack …"
-    $CDK deploy "${PROJECT_NAME}-gateway" --require-approval never
-
-    # ── Step 5: Force new deployment to pick up the latest image ──
-    info "Triggering ECS deployment …"
-    aws ecs update-service \
-        --cluster "${PROJECT_NAME}-gateway" \
-        --service "${PROJECT_NAME}-gateway" \
-        --force-new-deployment \
-        --no-cli-pager >/dev/null
-
-    info "Phase 4 complete."
-    info "ECS Gateway cluster: ${PROJECT_NAME}-gateway"
-    info "ECR image: ${ECR_URI}:latest"
-    info ""
-    info "To configure WeChat/Feishu, set secrets in Secrets Manager:"
-    info "  aws secretsmanager put-secret-value --secret-id hermes/weixin/token --secret-string 'YOUR_TOKEN'"
-    info "  aws secretsmanager put-secret-value --secret-id hermes/feishu/app-id --secret-string 'YOUR_APP_ID'"
-    info "  aws secretsmanager put-secret-value --secret-id hermes/feishu/app-secret --secret-string 'YOUR_SECRET'"
-}
-
-# --------------------------------------------------------------------------
 # Main
 # --------------------------------------------------------------------------
 case "$PHASE" in
@@ -309,15 +227,12 @@ case "$PHASE" in
     phase3)
         phase3
         ;;
-    phase4)
-        phase4
-        ;;
     cdk-only)
         phase1
         phase3
         ;;
     *)
-        error "Usage: $0 [all|phase1|phase2|phase3|phase4|cdk-only]"
+        error "Usage: $0 [all|phase1|phase2|phase3|cdk-only]"
         exit 1
         ;;
 esac

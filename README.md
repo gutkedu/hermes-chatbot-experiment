@@ -6,6 +6,18 @@ Authenticated product-support chatbot built with Hermes Agent on Amazon Bedrock 
 
 The current code is a baseline imported from the AWS sample recorded in [`UPSTREAM.md`](UPSTREAM.md). Existing messaging adapters remain for baseline fidelity; they are not the product's target interface. The next increment adds the authenticated web path.
 
+## Deployment architecture
+
+The default deployment is web-only:
+
+`CloudFront/S3 → API Gateway → Lambda → AgentCore Runtime (PUBLIC) → Bedrock`
+
+The default CDK synthesis contains only the Cognito security stack, the
+AgentCore base stack (S3 and IAM), and the authenticated web/API stack. VPC,
+NAT Gateway, private endpoints, ECS, Router, Cron, Observability, and Token
+Monitoring are not deployed. The latter stacks remain available for a later
+rollout through explicit CDK context flags.
+
 ## Prerequisites
 
 - Python 3.10 or newer

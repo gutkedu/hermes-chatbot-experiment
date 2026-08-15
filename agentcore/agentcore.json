@@ -1,15 +1,15 @@
 {
   "$schema": "https://schema.agentcore.aws.dev/v1/agentcore.json",
-  "name": "hermes",
+  "name": "hermes_chatbot_experiment",
   "version": 1,
   "managedBy": "CDK",
   "tags": {
     "agentcore:created-by": "agentcore-cli",
-    "agentcore:project-name": "hermes"
+    "agentcore:project-name": "hermes_chatbot_experiment"
   },
   "runtimes": [
     {
-      "name": "hermes",
+      "name": "hermes_chatbot_experiment",
       "build": "Container",
       "entrypoint": "main.py",
       "codeLocation": "app/hermes/",

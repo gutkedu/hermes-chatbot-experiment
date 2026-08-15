@@ -41,8 +41,6 @@ class HermesWebStack(Stack):
         super().__init__(scope, construct_id, **kwargs)
 
         project = self.node.try_get_context("project_name") or "hermes-agentcore"
-        region = Stack.of(self).region
-        account = Stack.of(self).account
 
         site_bucket = s3.Bucket(
             self,
@@ -66,7 +64,10 @@ class HermesWebStack(Stack):
         web_origin = f"https://{distribution.domain_name}"
         redirect_uri = f"{web_origin}/"
 
-        domain_prefix = f"{project}-{account}-{region}".lower().replace("_", "-")
+        project_slug = project.lower().replace("_", "-")
+        domain_prefix = Fn.sub(
+            f"{project_slug}-${{AWS::AccountId}}-${{AWS::Region}}",
+        )
         user_pool_domain = cognito.CfnUserPoolDomain(
             self,
             "UserPoolDomain",
@@ -265,7 +266,22 @@ class HermesWebStack(Stack):
     @staticmethod
     def _options_operation(origin: str) -> dict:
         return {
-            "responses": {"204": {"description": "CORS preflight"}},
+            "responses": {
+                "204": {
+                    "description": "CORS preflight",
+                    "headers": {
+                        "Access-Control-Allow-Origin": {
+                            "schema": {"type": "string"},
+                        },
+                        "Access-Control-Allow-Headers": {
+                            "schema": {"type": "string"},
+                        },
+                        "Access-Control-Allow-Methods": {
+                            "schema": {"type": "string"},
+                        },
+                    },
+                },
+            },
             "x-amazon-apigateway-integration": {
                 "type": "mock",
                 "requestTemplates": {"application/json": '{"statusCode": 204}'},

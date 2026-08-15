@@ -26,16 +26,14 @@
     "session_max_lifetime": 28800,
     "workspace_sync_interval_seconds": 300,
     "enable_guardrails": false,
-    "enable_token_monitoring": true,
+    "enable_router": false,
+    "enable_cron": false,
+    "enable_observability": false,
+    "enable_token_monitoring": false,
     "daily_token_budget": 2000000,
     "daily_cost_budget_usd": 20,
-
-    "channels": ["telegram", "slack", "discord", "feishu"],
-
-    "vpc_cidr": "10.0.0.0/16",
-    "az_count": 2,
     "alarm_email": "",
-    "agentcore_runtime_arn": "",
-    "agentcore_qualifier": ""
+    "agentcore_runtime_arn": "arn:aws:bedrock-agentcore:us-east-1:396608768142:runtime/hermes_hermes-9ehFM4BzfP",
+    "agentcore_qualifier": "DEFAULT"
   }
 }
