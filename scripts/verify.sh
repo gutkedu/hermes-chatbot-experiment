@@ -6,10 +6,7 @@ cd "$repo_root"
 
 npm ci
 npm ci --prefix lambda/web_chat
-npm ci --prefix agentcore/cdk
 npm run test:bff
 npm run test:web
 .venv/bin/python -m pytest tests -q
-npm --prefix agentcore/cdk test -- --runInBand
-npm --prefix agentcore/cdk run build
 npm run cdk:synth -- --quiet

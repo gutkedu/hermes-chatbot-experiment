@@ -26,6 +26,17 @@ test('AgentCore event-stream lines split across chunks are reassembled', async (
   assert.deepEqual(await collect(parseAgentCoreStream(body, 'text/event-stream')), ['Hello']);
 });
 
+test('AgentCore JSON envelopes preserve delta and source events', async () => {
+  const body = Readable.from([
+    Buffer.from('data: {"type":"delta","text":"30 dias"}\n\n'),
+    Buffer.from('data: {"type":"sources","sources":[{"title":"Lumen","identifier":"lumen.md","excerpt":"30 dias"}]}\n\n'),
+  ]);
+  assert.deepEqual(await collect(parseAgentCoreStream(body, 'text/event-stream')), [
+    { type: 'delta', text: '30 dias' },
+    { type: 'sources', sources: [{ title: 'Lumen', identifier: 'lumen.md', excerpt: '30 dias' }] },
+  ]);
+});
+
 test('JSON AgentCore fallback yields one response', async () => {
   const body = Readable.from([Buffer.from('{"response":"complete"}')]);
   assert.deepEqual(await collect(parseAgentCoreStream(body, 'application/json')), ['complete']);

@@ -54,7 +54,19 @@ function render() {
   elements.messages.replaceChildren(...state.messages.map((message) => {
     const node = document.createElement('div');
     node.className = `message message-${message.role}`;
-    node.textContent = message.text;
+    const text = document.createElement('div');
+    text.textContent = message.text;
+    node.append(text);
+    if (message.role === 'assistant' && message.sources?.length) {
+      const sources = document.createElement('ul');
+      sources.className = 'sources';
+      for (const source of message.sources) {
+        const item = document.createElement('li');
+        item.textContent = `${source.title}: ${source.excerpt}`;
+        sources.append(item);
+      }
+      node.append(sources);
+    }
     return node;
   }));
   elements.messages.scrollTop = elements.messages.scrollHeight;
@@ -118,6 +130,7 @@ async function sendMessage(message, retry = false) {
     }
     for await (const event of parseSse(responseChunks(response.body.getReader()))) {
       if (event.event === 'message.delta') dispatch({ type: 'DELTA', text: event.data.text ?? '' });
+      if (event.event === 'message.sources') dispatch({ type: 'SOURCES', sources: event.data.sources ?? [] });
       if (event.event === 'message.completed') dispatch({ type: 'COMPLETED' });
       if (event.event === 'error') dispatch({ type: 'FAILED', message: event.data.message ?? 'Try again.' });
     }

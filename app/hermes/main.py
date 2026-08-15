@@ -11,6 +11,7 @@ Architecture:
 from __future__ import annotations
 
 import logging
+import json
 import os
 import signal
 import sys
@@ -28,6 +29,7 @@ from bedrock_agentcore.runtime import BedrockAgentCoreApp  # noqa: E402
 from bridge.bedrock_compat import install_nova_bedrock_compat  # noqa: E402
 from bridge.model_config import resolve_bedrock_settings  # noqa: E402
 from bridge.streaming import stream_conversation  # noqa: E402
+from retrieval import retrieve_context  # noqa: E402
 
 logger = logging.getLogger("hermes.agentcore")
 app = BedrockAgentCoreApp()
@@ -96,10 +98,29 @@ async def invoke(payload, context):
         yield ""
         return
 
+    knowledge_base_id = os.environ.get("KNOWLEDGE_BASE_ID", "").strip()
+    if not knowledge_base_id:
+        log.error("KNOWLEDGE_BASE_ID is not configured")
+        yield json.dumps({"type": "delta", "text": "Não há evidência suficiente na base de conhecimento para responder a esta pergunta."})
+        return
+
     try:
+        import boto3
+        retrieval = await retrieve_context(
+            boto3.client("bedrock-agent-runtime", region_name=_get_region()),
+            knowledge_base_id,
+            message,
+        )
+        if retrieval.context is None:
+            yield json.dumps({"type": "delta", "text": "Não há evidência suficiente na base de conhecimento para responder a esta pergunta."})
+            return
         agent = get_or_create_agent()
 
-        system_extra = f"The user is contacting you via {channel}."
+        system_extra = (
+            f"The user is contacting you via {channel}. Answer only from the retrieved evidence below. "
+            "If the evidence does not answer the question, say there is insufficient evidence.\n\n"
+            f"{retrieval.context}"
+        )
         if payload.get("chatId"):
             system_extra += f" Chat ID: {payload['chatId']}."
 
@@ -113,10 +134,11 @@ async def invoke(payload, context):
             system_message=system_extra,
             conversation_history=history,
         ):
-            yield delta
+            yield json.dumps({"type": "delta", "text": delta})
+        yield json.dumps({"type": "sources", "sources": retrieval.sources})
     except Exception as exc:
         log.error("Agent error: %s\n%s", exc, traceback.format_exc())
-        yield f"Sorry, an error occurred: {exc}"
+        yield json.dumps({"type": "delta", "text": "Não há evidência suficiente na base de conhecimento para responder a esta pergunta."})
 
 
 # ---------------------------------------------------------------------------

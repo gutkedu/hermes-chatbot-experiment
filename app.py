@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """CDK app entry point for Hermes-Agent on Amazon Bedrock AgentCore.
 
-Instantiates the web-only stacks in dependency order.  The AgentCore runtime
-is deployed separately by the AgentCore Starter Toolkit between the base and
-web stacks.
+Instantiates the web-only stacks in dependency order, including the explicit
+AgentCore runtime and its private product Knowledge Base.
 
 Router, cron, observability, token monitoring, and guardrails remain
 available as opt-in stacks through CDK context flags, but are disabled by
@@ -17,6 +16,8 @@ import aws_cdk as cdk
 from stacks.security_stack import HermesSecurityStack
 from stacks.guardrails_stack import HermesGuardrailsStack
 from stacks.agentcore_stack import HermesAgentCoreStack
+from stacks.knowledge_base_stack import HermesKnowledgeBaseStack
+from stacks.runtime_stack import HermesRuntimeStack
 from stacks.observability_stack import HermesObservabilityStack
 from stacks.router_stack import HermesRouterStack
 from stacks.cron_stack import HermesCronStack
@@ -35,9 +36,6 @@ def context_bool(key: str, default: bool = False) -> bool:
 
 project = app.node.try_get_context("project_name") or "hermes-agentcore"
 
-# Optional: read AgentCore runtime IDs injected by Phase 2.
-agentcore_runtime_arn = app.node.try_get_context("agentcore_runtime_arn") or ""
-agentcore_qualifier = app.node.try_get_context("agentcore_qualifier") or ""
 alarm_email = app.node.try_get_context("alarm_email") or ""
 
 # --------------------------------------------------------------------------
@@ -53,6 +51,16 @@ agentcore_stack = HermesAgentCoreStack(
     app,
     f"{project}-agentcore",
 )
+knowledge_base_stack = HermesKnowledgeBaseStack(app, f"{project}-knowledge-base")
+runtime_stack = HermesRuntimeStack(
+    app,
+    f"{project}-runtime",
+    execution_role=agentcore_stack.execution_role,
+    knowledge_base_id=knowledge_base_stack.knowledge_base.ref,
+    knowledge_base_arn=knowledge_base_stack.knowledge_base.get_att("KnowledgeBaseArn").to_string(),
+)
+runtime_stack.add_dependency(agentcore_stack)
+runtime_stack.add_dependency(knowledge_base_stack)
 
 enable_token_monitoring = context_bool("enable_token_monitoring")
 enable_observability = enable_token_monitoring or context_bool("enable_observability")
@@ -71,8 +79,8 @@ if context_bool("enable_router"):
         f"{project}-router",
         execution_role_arn=agentcore_stack.execution_role.role_arn,
         bucket_name=agentcore_stack.bucket.bucket_name,
-        agentcore_runtime_arn=agentcore_runtime_arn,
-        agentcore_qualifier=agentcore_qualifier,
+        agentcore_runtime_arn=runtime_stack.runtime.ref,
+        agentcore_qualifier="DEFAULT",
     )
     router_stack.add_dependency(agentcore_stack)
 
@@ -80,8 +88,8 @@ if context_bool("enable_cron"):
     HermesCronStack(
         app,
         f"{project}-cron",
-        agentcore_runtime_arn=agentcore_runtime_arn,
-        agentcore_qualifier=agentcore_qualifier,
+        agentcore_runtime_arn=runtime_stack.runtime.ref,
+        agentcore_qualifier="DEFAULT",
     )
 
 if enable_token_monitoring:
@@ -105,10 +113,10 @@ web_stack = HermesWebStack(
     f"{project}-web",
     user_pool_id=security_stack.user_pool.user_pool_id,
     user_pool_arn=security_stack.user_pool.user_pool_arn,
-    agentcore_runtime_arn=agentcore_runtime_arn,
-    agentcore_qualifier=agentcore_qualifier,
+    agentcore_runtime_arn=runtime_stack.runtime.ref,
+    agentcore_qualifier="DEFAULT",
 )
 web_stack.add_dependency(security_stack)
-web_stack.add_dependency(agentcore_stack)
+web_stack.add_dependency(runtime_stack)
 
 app.synth()
