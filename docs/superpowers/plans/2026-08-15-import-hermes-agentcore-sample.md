@@ -12,7 +12,7 @@
 
 ## File structure
 
-- `UPSTREAM.md`: immutable provenance, revision, import date, and intentional path mappings.
+- `UPSTREAM.md`: immutable provenance, revision, import date, and intentional path mappings/exclusions.
 - `THIRD_PARTY_LICENSES/aws-sample-MIT-0.txt`: exact upstream license text.
 - `README.md`: project purpose, browser target, baseline status, setup, and verification.
 - `app.py`, `cdk.json`, `stacks/`: Python CDK application imported from upstream.
@@ -87,7 +87,6 @@ git commit -m "test: define imported sample baseline"
 ### Task 2: Import the fixed upstream snapshot with provenance
 
 **Files:**
-- Create: `.claude/settings.json`
 - Create: `.gitignore`
 - Create: `CODE_OF_CONDUCT.md`
 - Create: `CONTRIBUTING.md`
@@ -108,6 +107,7 @@ git commit -m "test: define imported sample baseline"
 - Modify: `README.md`
 - Preserve: `LICENSE`
 - Preserve: `docs/superpowers/**`
+- Exclude: `.claude/settings.json` from upstream; record the reason in `UPSTREAM.md`.
 
 - [ ] **Step 1: Materialize the exact upstream tree in a temporary directory**
 
@@ -129,6 +129,8 @@ Expected: the final `test` exits with status 0.
 git -C "$IMPORT_DIR/upstream" ls-files -z \
   | while IFS= read -r -d '' path; do
       case "$path" in
+        .claude/settings.json)
+          ;;
         LICENSE)
           mkdir -p THIRD_PARTY_LICENSES
           cp "$IMPORT_DIR/upstream/$path" THIRD_PARTY_LICENSES/aws-sample-MIT-0.txt
@@ -174,6 +176,7 @@ This repository was bootstrapped from
 - Upstream `LICENSE` is preserved as `THIRD_PARTY_LICENSES/aws-sample-MIT-0.txt`; the root `LICENSE` remains this project's MIT license.
 - Upstream `README.md` is preserved as `docs/upstream/AWS_SAMPLE_README.md`; the root `README.md` describes this product.
 - Upstream `README_ZH.md` and `docs/*` are preserved under `docs/upstream/`.
+- Upstream `.claude/settings.json` is excluded because it contains paths and a webhook URL specific to another environment; this repository uses its own `AGENTS.md` configuration.
 
 Future upstream updates must record the old and new revisions and review local adaptations before copying files.
 ````
@@ -184,17 +187,18 @@ Run: `python3 -m pytest tests/test_repository_baseline.py -v`
 
 Expected: 3 tests PASS.
 
-- [ ] **Step 5: Review the imported agent settings and secret patterns**
+- [ ] **Step 5: Verify the excluded agent settings and secret patterns**
 
 Run:
 
 ```bash
-git diff -- .claude/settings.json .gitignore
+test ! -e .claude/settings.json
+git diff -- .gitignore
 git grep -n -E '(AKIA[0-9A-Z]{16}|gh[opsu]_[A-Za-z0-9]{20,}|-----BEGIN (RSA |EC )?PRIVATE KEY-----)' -- . \
   ':!docs/superpowers/plans/2026-08-15-import-hermes-agentcore-sample.md'
 ```
 
-Expected: the settings diff contains only upstream command permissions; the secret scan prints no matches.
+Expected: `.claude/settings.json` is absent and the secret scan prints no matches.
 
 - [ ] **Step 6: Commit the snapshot and provenance**
 
@@ -281,14 +285,28 @@ Replace the root `package.json` scripts and identity fields while retaining its 
   "private": true,
   "description": "Authenticated product-support chatbot built with Hermes Agent and Amazon Bedrock AgentCore",
   "scripts": {
-    "cdk:synth": "cdk synth --app 'python3 app.py'"
+    "cdk:synth": "cdk synth --app '.venv/bin/python app.py'"
   },
   "license": "MIT",
   "dependencies": {
-    "aws-cdk": "2.1118.0"
+    "aws-cdk": "2.1136.0"
   }
 }
 ```
+
+Pin the AgentCore CDK dependency pair in `agentcore/cdk/package.json`:
+
+````json
+{
+  "dependencies": {
+    "@aws/agentcore-cdk": "0.1.0-alpha.47",
+    "aws-cdk-lib": "2.265.0",
+    "constructs": "^10.0.0"
+  }
+}
+````
+
+Record both adjustments in `UPSTREAM.md`.
 
 - [ ] **Step 5: Generate and commit deterministic locks**
 
@@ -296,13 +314,13 @@ Run:
 
 ```bash
 python3 -m venv .venv
-.venv/bin/python -m pip install --upgrade pip pip-tools==7.5.0
+.venv/bin/python -m pip install "pip==24.3.1" "pip-tools==7.5.0"
 .venv/bin/pip-compile --generate-hashes --output-file=requirements.lock requirements-dev.in
 npm install --package-lock-only
 npm --prefix agentcore/cdk install --package-lock-only
 ```
 
-Expected: `requirements.lock`, `package-lock.json`, and `agentcore/cdk/package-lock.json` are created without dependency-resolution errors.
+Expected: `requirements.lock`, `package-lock.json`, and `agentcore/cdk/package-lock.json` are created without dependency-resolution errors. The pinned pip version keeps pip-tools 7.5.0 compatible with the lock-generation command.
 
 - [ ] **Step 6: Run the baseline contract**
 
