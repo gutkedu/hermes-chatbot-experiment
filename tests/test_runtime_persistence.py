@@ -130,3 +130,76 @@ def test_final_save_is_attempted_when_agent_stream_fails(runtime, monkeypatch, t
 
     assert output
     assert events[-1] == f"save:{NAMESPACE}"
+
+
+def test_memory_is_retrieved_before_response_and_recorded_after_complete_stream(runtime, monkeypatch):
+    events: list[str] = []
+    monkeypatch.delenv("S3_BUCKET", raising=False)
+    monkeypatch.setenv("KNOWLEDGE_BASE_ID", "kb-id")
+    monkeypatch.setenv("AGENTCORE_MEMORY_ID", "memory-id")
+
+    class Memory:
+        def retrieve_context(self, actor_id, query):
+            events.append(f"memory-retrieve:{actor_id}:{query}")
+            return "BEGIN AGENTCORE MEMORY (UNTRUSTED DATA)\npreference\nEND AGENTCORE MEMORY"
+
+        def record_turn(self, actor_id, session_id, user_text, assistant_text):
+            events.append(f"memory-record:{actor_id}:{session_id}:{user_text}:{assistant_text}")
+            return True
+
+    monkeypatch.setattr(runtime, "MemoryBridge", lambda *args, **kwargs: Memory())
+    monkeypatch.setattr(runtime, "retrieve_context", lambda *args: asyncio.sleep(0, result=types.SimpleNamespace(context="evidence", sources=[])))
+
+    async def stream(agent, **kwargs):
+        events.append(f"agent:{kwargs['system_message']}")
+        yield "answer"
+
+    monkeypatch.setattr(runtime, "get_or_create_agent", lambda: object())
+    monkeypatch.setattr(runtime, "stream_conversation", stream)
+
+    output = _collect(
+        runtime.invoke(
+            {"message": "hello", "userId": "untrusted-payload-user"},
+            types.SimpleNamespace(
+                session_id=SESSION,
+                request_headers={"X-Amzn-Bedrock-AgentCore-Runtime-User-Id": "authenticated-user"},
+            ),
+        )
+    )
+
+    assert output
+    agent_event_index = next(index for index, value in enumerate(events) if value.startswith("agent:"))
+    assert events.index("memory-retrieve:authenticated-user:hello") < agent_event_index
+    assert events[-1] == "memory-record:authenticated-user:" + SESSION + ":hello:answer"
+    system_message = next(value for value in events if value.startswith("agent:"))
+    assert "preference" in system_message
+    assert "untrusted-payload-user" not in system_message
+
+
+def test_memory_failure_does_not_stop_response_stream(runtime, monkeypatch):
+    events: list[str] = []
+    monkeypatch.delenv("S3_BUCKET", raising=False)
+    monkeypatch.setenv("KNOWLEDGE_BASE_ID", "kb-id")
+    monkeypatch.setenv("AGENTCORE_MEMORY_ID", "memory-id")
+
+    class BrokenMemory:
+        def retrieve_context(self, *_args):
+            raise RuntimeError("memory down")
+
+        def record_turn(self, *_args):
+            raise RuntimeError("memory down")
+
+    monkeypatch.setattr(runtime, "MemoryBridge", lambda *args, **kwargs: BrokenMemory())
+    monkeypatch.setattr(runtime, "retrieve_context", lambda *args: asyncio.sleep(0, result=types.SimpleNamespace(context="evidence", sources=[])))
+    monkeypatch.setattr(runtime, "get_or_create_agent", lambda: object())
+
+    async def stream(agent, **kwargs):
+        events.append("generated")
+        yield "answer"
+
+    monkeypatch.setattr(runtime, "stream_conversation", stream)
+
+    output = _collect(runtime.invoke({"message": "hello"}, types.SimpleNamespace(session_id=SESSION)))
+
+    assert any('"text": "answer"' in item for item in output)
+    assert events == ["generated"]

@@ -59,6 +59,7 @@ runtime_stack = HermesRuntimeStack(
     knowledge_base_id=knowledge_base_stack.knowledge_base.ref,
     knowledge_base_arn=knowledge_base_stack.knowledge_base.get_att("KnowledgeBaseArn").to_string(),
     workspace_bucket_name=agentcore_stack.bucket.bucket_name,
+    memory_id=agentcore_stack.memory.get_att("MemoryId").to_string(),
 )
 runtime_stack.add_dependency(agentcore_stack)
 runtime_stack.add_dependency(knowledge_base_stack)

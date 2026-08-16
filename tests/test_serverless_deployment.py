@@ -103,6 +103,46 @@ def test_agentcore_workspace_bucket_is_private_versioned_and_prefix_scoped() -> 
     assert "grant_read_write" not in policies
 
 
+def test_agentcore_stack_provisions_memory_with_required_strategies_and_outputs() -> None:
+    app = App(context={"project_name": "hermes-test"})
+    template = Template.from_stack(HermesAgentCoreStack(app, "AgentCore"))
+
+    template.has_resource_properties(
+        "AWS::BedrockAgentCore::Memory",
+        {
+            "EventExpiryDuration": 90,
+            "Name": "hermes_test_memory",
+            "MemoryStrategies": [
+                {
+                    "UserPreferenceMemoryStrategy": {
+                        "Name": "UserPreferences",
+                        "NamespaceTemplates": ["/users/{actorId}/preferences/"],
+                    }
+                },
+                {
+                    "SummaryMemoryStrategy": {
+                        "Name": "SessionSummaries",
+                        "NamespaceTemplates": ["/users/{actorId}/summaries/{sessionId}/"],
+                    }
+                },
+            ],
+        },
+    )
+    outputs = template.to_json()["Outputs"]
+    assert "MemoryId" in outputs
+    assert "MemoryArn" in outputs
+
+
+def test_agentcore_memory_permissions_are_scoped_to_created_memory() -> None:
+    app = App(context={"project_name": "hermes-test"})
+    template = Template.from_stack(HermesAgentCoreStack(app, "AgentCore"))
+    policies = json.dumps(template.find_resources("AWS::IAM::Policy"))
+
+    for action in ("bedrock-agentcore:GetMemory", "bedrock-agentcore:CreateEvent", "bedrock-agentcore:RetrieveMemoryRecords"):
+        assert action in policies
+    assert '"Fn::GetAtt": ["Memory", "MemoryArn"]' in policies
+
+
 def test_runtime_receives_workspace_bucket_and_execution_role_configuration() -> None:
     stack_names = _synth_stack_names()
     assert "hermes-agentcore-runtime" in stack_names
@@ -119,6 +159,7 @@ def test_runtime_receives_workspace_bucket_and_execution_role_configuration() ->
     variables = runtime["Properties"]["EnvironmentVariables"]
     assert "S3_BUCKET" in variables
     assert "EXECUTION_ROLE_ARN" in variables
+    assert "AGENTCORE_MEMORY_ID" in variables
 
 
 def test_token_monitoring_remains_synthesizable_when_enabled() -> None:
@@ -162,6 +203,7 @@ def test_deploy_script_is_web_only() -> None:
     assert '"${PROJECT_NAME}-knowledge-base"' in script
     assert '"${PROJECT_NAME}-runtime"' in script
     assert '"${PROJECT_NAME}-web"' in script
+    assert "--exclude='memory.py'" in script
 
     phase1 = script.split("phase1()", 1)[1].split("phase2()", 1)[0]
     assert phase1.index('"${PROJECT_NAME}-agentcore"') < phase1.index(
