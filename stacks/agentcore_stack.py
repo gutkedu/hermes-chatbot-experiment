@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from aws_cdk import (
     Duration,
+    Fn,
     RemovalPolicy,
     Stack,
     aws_iam as iam,
@@ -58,9 +59,12 @@ class HermesAgentCoreStack(Stack):
             self,
             "ExecutionRole",
             role_name=f"{project}-execution-role",
-            assumed_by=iam.CompositePrincipal(
-                iam.ServicePrincipal("bedrock.amazonaws.com"),
-                iam.AccountPrincipal(account),
+            assumed_by=iam.ServicePrincipal(
+                "bedrock-agentcore.amazonaws.com",
+                conditions={
+                    "StringEquals": {"aws:SourceAccount": account},
+                    "ArnLike": {"aws:SourceArn": Fn.sub("arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:runtime/*")},
+                },
             ),
         )
 
@@ -73,8 +77,9 @@ class HermesAgentCoreStack(Stack):
                     "bedrock:InvokeModelWithResponseStream",
                 ],
                 resources=[
-                    f"arn:aws:bedrock:{region}::foundation-model/*",
-                    f"arn:aws:bedrock:*:{account}:inference-profile/*",
+                    Stack.of(self).format_arn(
+                        service="bedrock", region=region, account="", resource="foundation-model/amazon.nova-lite-v1:0"
+                    ),
                 ],
             )
         )
@@ -109,19 +114,6 @@ class HermesAgentCoreStack(Stack):
                     "logs:CreateLogStream",
                     "logs:PutLogEvents",
                     "cloudwatch:PutMetricData",
-                ],
-                resources=["*"],
-            )
-        )
-
-        # ECR — pull container image.
-        self.execution_role.add_to_policy(
-            iam.PolicyStatement(
-                sid="ECRPull",
-                actions=[
-                    "ecr:GetAuthorizationToken",
-                    "ecr:BatchGetImage",
-                    "ecr:GetDownloadUrlForLayer",
                 ],
                 resources=["*"],
             )

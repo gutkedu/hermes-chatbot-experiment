@@ -49,6 +49,7 @@ COPY bridge/ /app/bridge/
 
 # Copy main entrypoint.
 COPY main.py /app/main.py
+COPY retrieval.py /app/retrieval.py
 
 # Make everything importable.
 ENV PYTHONPATH="/app:/app/hermes-agent"

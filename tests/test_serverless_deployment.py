@@ -56,6 +56,8 @@ def test_default_synthesis_is_web_only() -> None:
     assert _synth_stack_names() == {
         "hermes-agentcore-security",
         "hermes-agentcore-agentcore",
+        "hermes-agentcore-knowledge-base",
+        "hermes-agentcore-runtime",
         "hermes-agentcore-web",
     }
 
@@ -103,6 +105,11 @@ def test_agentcore_runtime_uses_public_networking() -> None:
     assert "securityGroup" not in runtime
 
 
+def test_explicit_cdk_runtime_uses_the_knowledge_base_environment_variable() -> None:
+    stack_names = _synth_stack_names()
+    assert "hermes-agentcore-runtime" in stack_names
+
+
 def test_deploy_script_is_web_only() -> None:
     script = DEPLOY.read_text(encoding="utf-8")
 
@@ -119,6 +126,8 @@ def test_deploy_script_is_web_only() -> None:
 
     assert '"${PROJECT_NAME}-security"' in script
     assert '"${PROJECT_NAME}-agentcore"' in script
+    assert '"${PROJECT_NAME}-knowledge-base"' in script
+    assert '"${PROJECT_NAME}-runtime"' in script
     assert '"${PROJECT_NAME}-web"' in script
 
     phase1 = script.split("phase1()", 1)[1].split("phase2()", 1)[0]

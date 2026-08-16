@@ -1,16 +1,15 @@
 # Authenticated web chat runbook
 
 This runbook is for an AWS account where the operator is authorized to create
-and remove Cognito, CloudFront, S3, API Gateway, Lambda, and AgentCore
+and remove Cognito, CloudFront, S3, API Gateway, Lambda, AgentCore, and the
+private Knowledge Base resources.
 resources. The local verifier is credential-free; the smoke test below is the
 authorized-environment check.
 
 ## Deploy
 
 1. Install the prerequisites from `README.md`, configure AWS credentials, and
-   choose a region. Set `project_name`, `agentcore_runtime_arn`, and
-   `agentcore_qualifier` in `cdk.json` (the normal path is
-   `./scripts/deploy.sh`, which obtains the runtime values during Phase 2).
+   choose `us-east-1` as the region. Set `project_name` in `cdk.json`.
 2. Deploy the foundation and runtime:
 
    ```bash
@@ -19,6 +18,8 @@ authorized-environment check.
    ./scripts/deploy.sh phase3
    ```
 
+   Phase 2 creates the private document bucket, S3 Vectors index, Knowledge
+   Base, and AgentCore runtime. It does not ingest documents automatically.
    Phase 3 deploys only the `hermes-agentcore-web` stack. It prints the
    CloudFront site URL, streaming API URL, Cognito domain, and public web
    client ID.
@@ -44,6 +45,31 @@ authorized-environment check.
    `message.delta` SSE events arrive.
 
 ## Verify authentication and streaming
+
+## Ingest and verify product evidence
+
+The seed document is `knowledge-base/lumen-desk-lamp.md`. To upload a revised
+version, copy it under the `knowledge-base/` prefix in the `DocumentsBucketName`
+output, then deliberately start ingestion:
+
+```bash
+./scripts/ingest_knowledge_base.sh
+```
+
+After the command reports `COMPLETE`, verify retrieval without exposing the
+private source object:
+
+```bash
+aws bedrock-agent-runtime retrieve \
+  --knowledge-base-id "$(aws cloudformation describe-stacks --stack-name hermes-agentcore-knowledge-base --query 'Stacks[0].Outputs[?OutputKey==`KnowledgeBaseId`].OutputValue' --output text)" \
+  --retrieval-query 'text=Qual é o prazo de devolução da luminária Lumen?' \
+  --retrieval-configuration 'vectorSearchConfiguration={numberOfResults=3,overrideSearchType=SEMANTIC}'
+```
+
+The retrieved text must state “30 dias corridos após a entrega”. Then send the
+same question through the authenticated chat. The assistant should state that
+answer and render one citation with the document title and excerpt; it must not
+expose a bucket URL or download link.
 
 The BFF derives opaque AgentCore session and user IDs from the Cognito `iss`
 and `sub` claims. It never accepts a browser-provided session identifier.
@@ -90,5 +116,7 @@ When the demonstration is complete, run the interactive teardown (or
 
 The destroyable web bucket, CloudFront distribution, API, Lambda, and Hosted UI
 resources are removed with `hermes-agentcore-web`. The Cognito user pool is
-retained so it can be reused by the web application. The web-only deployment
+retained so it can be reused by the web application. The teardown script then
+deletes the retained S3 Vectors index and vector bucket in that order; it does
+not print document contents, tokens, or credentials. The web-only deployment
 does not create a dedicated KMS key or channel secrets.

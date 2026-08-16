@@ -58,6 +58,17 @@ test('valid chat emits started, deltas, and completed events', async () => {
   assert.equal(calls[0].input.runtimeSessionId.startsWith('web-session-'), true);
 });
 
+test('knowledge-base source envelopes become a bounded message.sources event', async () => {
+  const client = { send: async () => ({
+    contentType: 'text/event-stream',
+    response: Readable.from([Buffer.from('data: {"type":"sources","sources":[{"title":"Lumen","identifier":"lumen.md","excerpt":"30 dias"}]}\n\n')]),
+  }) };
+  const response = await routeRequest(event(), { client, env, requestId: 'req-sources' });
+  const body = await readBody(response.body);
+  assert.match(body, /event: message.sources/);
+  assert.match(body, /"title":"Lumen"/);
+});
+
 test('missing identity returns JSON 401 before streaming', async () => {
   const response = await routeRequest(event({ requestContext: {} }), {
     client: { send: async () => { throw new Error('must not invoke'); } },

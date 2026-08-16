@@ -38,6 +38,16 @@ function textFromData(value) {
   return '';
 }
 
+function eventFromData(value) {
+  if (typeof value === 'string') {
+    const nested = decodeData(value);
+    if (nested !== value) return eventFromData(nested);
+  }
+  if (value && typeof value === 'object' && (value.type === 'delta' || value.type === 'sources')) return value;
+  const text = textFromData(value);
+  return text || null;
+}
+
 export async function* parseAgentCoreStream(body, contentType = '') {
   if (!body) throw new HttpError(502, 'Agent response was empty', true);
 
@@ -50,14 +60,14 @@ export async function* parseAgentCoreStream(body, contentType = '') {
       pending = lines.pop() ?? '';
       for (const line of lines) {
         if (!line.startsWith('data:')) continue;
-        const text = textFromData(decodeData(line.slice(5).trim()));
-        if (text) yield text;
+        const event = eventFromData(decodeData(line.slice(5).trim()));
+        if (event) yield event;
       }
     }
     pending += decoder.decode();
     if (pending.startsWith('data:')) {
-      const text = textFromData(decodeData(pending.slice(5).trim()));
-      if (text) yield text;
+      const event = eventFromData(decodeData(pending.slice(5).trim()));
+      if (event) yield event;
     }
     return;
   }
@@ -74,8 +84,8 @@ export async function* parseAgentCoreStream(body, contentType = '') {
   }
   try {
     const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-    const text = textFromData(parsed?.response ?? parsed?.text ?? parsed);
-    if (text) yield text;
+    const event = eventFromData(parsed?.response ?? parsed?.text ?? parsed);
+    if (event) yield event;
   } catch {
     throw new HttpError(502, 'Agent response was invalid', true);
   }

@@ -31,6 +31,13 @@ export function reduce(state, action) {
       messages[messages.length - 1] = { ...last, text: last.text + action.text };
       return { ...state, status: 'streaming', messages };
     }
+    case 'SOURCES': {
+      const messages = state.messages.slice();
+      const last = messages[messages.length - 1];
+      if (!last || last.role !== 'assistant') return state;
+      messages[messages.length - 1] = { ...last, sources: action.sources.slice(0, 3) };
+      return { ...state, messages };
+    }
     case 'COMPLETED':
       return { ...state, status: 'ready', pendingMessage: null };
     case 'FAILED':

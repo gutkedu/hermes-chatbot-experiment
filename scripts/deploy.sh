@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # --------------------------------------------------------------------------
-# Web-only deploy script for Hermes-Agent on Amazon Bedrock AgentCore.
+# Deploy Hermes, its Knowledge Base, and the authenticated web chat.
 #
 # Usage:
-#   ./scripts/deploy.sh           # Run base, runtime, and web phases
+#   ./scripts/deploy.sh           # Run base, Knowledge Base/runtime, and web phases
 #   ./scripts/deploy.sh phase1    # CDK base stacks only
-#   ./scripts/deploy.sh phase2    # AgentCore Toolkit (build + deploy runtime)
+#   ./scripts/deploy.sh phase2    # Knowledge Base + CDK-built AgentCore runtime
 #   ./scripts/deploy.sh phase3    # Web/API stack only
-#   ./scripts/deploy.sh cdk-only  # Base + web (skip runtime build)
+#   ./scripts/deploy.sh cdk-only  # CDK stacks only (identical to all)
 # --------------------------------------------------------------------------
 set -euo pipefail
 
@@ -78,34 +78,10 @@ phase1() {
 }
 
 # --------------------------------------------------------------------------
-# Phase 2: AgentCore Starter Toolkit
+# Phase 2: Knowledge Base and explicit AgentCore runtime
 # --------------------------------------------------------------------------
 phase2() {
-    info "=== Phase 2: AgentCore Runtime (build + deploy) ==="
-
-    # Check toolkit is installed.
-    if ! command -v agentcore &>/dev/null; then
-        info "Installing @aws/agentcore CLI …"
-        npm install -g @aws/agentcore
-    fi
-
-    # Ensure aws-targets.json exists (agentcore CDK requires it).
-    if [ ! -f "$PROJECT_DIR/agentcore/aws-targets.json" ]; then
-        info "Generating agentcore/aws-targets.json from current AWS credentials …"
-        _ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-        _REGION=$(resolve_region)
-        cat > "$PROJECT_DIR/agentcore/aws-targets.json" <<TARGETS
-[
-  {
-    "name": "default",
-    "description": "Default deployment target",
-    "account": "$_ACCOUNT",
-    "region": "$_REGION"
-  }
-]
-TARGETS
-        info "Created aws-targets.json (account=$_ACCOUNT, region=$_REGION)"
-    fi
+    info "=== Phase 2: Knowledge Base + AgentCore Runtime ==="
 
     # Copy hermes-agent source into the app/hermes/ Docker build context.
     if [ ! -d "$PROJECT_DIR/app/hermes/hermes-agent" ]; then
@@ -123,44 +99,7 @@ TARGETS
     rsync -a --delete --exclude='__pycache__' --exclude='Dockerfile' \
         "$PROJECT_DIR/bridge/" "$PROJECT_DIR/app/hermes/bridge/"
 
-    # Build and deploy via agentcore CLI.
-    info "Deploying to AgentCore …"
-    agentcore deploy --yes --verbose
-
-    # Extract runtime IDs and write back to cdk.json.
-    info "Extracting runtime IDs …"
-    # Strip ANSI escape sequences (agentcore CLI may emit cursor control codes).
-    STATUS_JSON=$(agentcore status --json 2>/dev/null | sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' || echo "{}")
-    RUNTIME_ARN=$(echo "$STATUS_JSON" | jq -r '
-        .resources[0].identifier //
-        .runtimes[0].agentRuntimeArn //
-        .runtimes[0].runtimeArn //
-        .agentRuntimeArn //
-        .runtimeArn //
-        empty' 2>/dev/null || echo "")
-    # AgentCore qualifiers are endpoint IDs (DEFAULT unless a pinned endpoint is created).
-    # Runtime IDs are not valid qualifiers.
-    QUALIFIER=$(echo "$STATUS_JSON" | jq -r '
-        .runtimes[0].qualifier //
-        .qualifier //
-        .endpointId //
-        "DEFAULT"' 2>/dev/null | sed 's|.*/||' || echo "DEFAULT")
-
-    if [ -n "$RUNTIME_ARN" ]; then
-        info "Runtime ARN:  $RUNTIME_ARN"
-        info "Qualifier:    $QUALIFIER"
-
-        # Update cdk.json with runtime IDs.
-        TMP=$(mktemp)
-        jq ".context.agentcore_runtime_arn = \"$RUNTIME_ARN\" | \
-            .context.agentcore_qualifier = \"$QUALIFIER\"" \
-            cdk.json > "$TMP" && mv "$TMP" cdk.json
-
-        info "cdk.json updated with runtime IDs."
-    else
-        warn "Could not extract runtime IDs automatically."
-        warn "Run 'agentcore status --json' and set agentcore_runtime_arn / agentcore_qualifier in cdk.json manually."
-    fi
+    $CDK deploy "${PROJECT_NAME}-knowledge-base" "${PROJECT_NAME}-runtime" --require-approval never
 
     info "Phase 2 complete."
 }
@@ -170,13 +109,6 @@ TARGETS
 # --------------------------------------------------------------------------
 phase3() {
     info "=== Phase 3: Web/API Stack ==="
-
-    # Verify runtime IDs are set.
-    RUNTIME_ARN=$(jq -r '.context.agentcore_runtime_arn // empty' cdk.json)
-    if [ -z "$RUNTIME_ARN" ]; then
-        warn "agentcore_runtime_arn not set in cdk.json — Lambda will not be able to invoke AgentCore."
-        warn "Run Phase 2 first, or set the values manually."
-    fi
 
     # Stage the BFF's production dependency tree before CDK packages the
     # Lambda asset. This is intentionally credential-free and deterministic.
@@ -229,6 +161,7 @@ case "$PHASE" in
         ;;
     cdk-only)
         phase1
+        phase2
         phase3
         ;;
     *)
