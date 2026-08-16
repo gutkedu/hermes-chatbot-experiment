@@ -96,7 +96,7 @@ phase2() {
 
     # Copy bridge/ into app/hermes/ so Dockerfile can access it.
     info "Syncing bridge/ into app/hermes/bridge/ …"
-    rsync -a --delete --exclude='__pycache__' --exclude='Dockerfile' \
+    rsync -a --delete --exclude='__pycache__' --exclude='Dockerfile' --exclude='memory.py' \
         "$PROJECT_DIR/bridge/" "$PROJECT_DIR/app/hermes/bridge/"
 
     $CDK deploy "${PROJECT_NAME}-knowledge-base" "${PROJECT_NAME}-runtime" --require-approval never

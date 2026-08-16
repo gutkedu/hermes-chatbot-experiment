@@ -11,7 +11,7 @@ from constructs import Construct
 
 
 class HermesRuntimeStack(Stack):
-    def __init__(self, scope: Construct, construct_id: str, *, execution_role: iam.IRole, knowledge_base_id: str, knowledge_base_arn: str, workspace_bucket_name: str, **kwargs) -> None:
+    def __init__(self, scope: Construct, construct_id: str, *, execution_role: iam.IRole, knowledge_base_id: str, knowledge_base_arn: str, workspace_bucket_name: str, memory_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
         project = self.node.try_get_context("project_name") or "hermes-agentcore"
         image = ecr_assets.DockerImageAsset(self, "HermesImage", directory=str(Path(__file__).parents[1] / "app" / "hermes"), platform=ecr_assets.Platform.LINUX_ARM64)
@@ -55,6 +55,7 @@ class HermesRuntimeStack(Stack):
                 "ProtocolConfiguration": "HTTP",
                 "EnvironmentVariables": {
                     "KNOWLEDGE_BASE_ID": knowledge_base_id,
+                    "AGENTCORE_MEMORY_ID": memory_id,
                     "S3_BUCKET": workspace_bucket_name,
                     "EXECUTION_ROLE_ARN": execution_role.role_arn,
                     "AWS_DEFAULT_REGION": Stack.of(self).region,

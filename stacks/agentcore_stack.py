@@ -12,6 +12,7 @@ from aws_cdk import (
     Fn,
     RemovalPolicy,
     Stack,
+    CfnResource,
     aws_iam as iam,
     aws_s3 as s3,
     CfnOutput,
@@ -51,6 +52,44 @@ class HermesAgentCoreStack(Stack):
                     noncurrent_version_expiration=Duration.days(90),
                 ),
             ],
+        )
+
+        # ---- AgentCore Memory -------------------------------------------
+        # CloudFormation names may contain only letters, digits, and
+        # underscores. Keep the name deterministic so a deploy can update the
+        # same memory resource instead of creating a second store.
+        memory_name = "".join(
+            character if character.isascii() and (character.isalnum() or character == "_") else "_"
+            for character in project
+        )
+        if not memory_name or not memory_name[0].isalpha():
+            memory_name = f"Hermes_{memory_name}"
+        memory_name = f"{memory_name[:39]}_memory"
+        self.memory = CfnResource(
+            self,
+            "Memory",
+            type="AWS::BedrockAgentCore::Memory",
+            properties={
+                "Name": memory_name,
+                "Description": "Persistent preference and conversation memory for Hermes.",
+                "EventExpiryDuration": 90,
+                "MemoryStrategies": [
+                    {
+                        "UserPreferenceMemoryStrategy": {
+                            "Name": "UserPreferences",
+                            "NamespaceTemplates": ["/users/{actorId}/preferences/"],
+                        }
+                    },
+                    {
+                        "SummaryMemoryStrategy": {
+                            "Name": "SessionSummaries",
+                            "NamespaceTemplates": [
+                                "/users/{actorId}/summaries/{sessionId}/"
+                            ],
+                        }
+                    },
+                ],
+            },
         )
 
         # ---- IAM execution role ------------------------------------------
@@ -107,6 +146,19 @@ class HermesAgentCoreStack(Stack):
             )
         )
 
+        # AgentCore Memory — access is limited to this memory resource.
+        self.execution_role.add_to_policy(
+            iam.PolicyStatement(
+                sid="AgentCoreMemoryAccess",
+                actions=[
+                    "bedrock-agentcore:GetMemory",
+                    "bedrock-agentcore:CreateEvent",
+                    "bedrock-agentcore:RetrieveMemoryRecords",
+                ],
+                resources=[self.memory.get_att("MemoryArn").to_string()],
+            )
+        )
+
         # S3 — workspace objects only. The runtime receives an additional
         # short-lived STS session policy for the concrete ws-* namespace.
         self.execution_role.add_to_policy(
@@ -152,3 +204,5 @@ class HermesAgentCoreStack(Stack):
 
         CfnOutput(self, "ExecutionRoleArn", value=self.execution_role.role_arn)
         CfnOutput(self, "BucketName", value=self.bucket.bucket_name)
+        CfnOutput(self, "MemoryId", value=self.memory.get_att("MemoryId").to_string())
+        CfnOutput(self, "MemoryArn", value=self.memory.get_att("MemoryArn").to_string())

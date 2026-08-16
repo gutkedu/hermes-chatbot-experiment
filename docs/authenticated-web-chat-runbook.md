@@ -93,6 +93,60 @@ Without `S3_BUCKET`, the runtime explicitly operates with an ephemeral
 workspace. With persistence enabled, a missing, malformed, traversal-like, or
 session-mismatched namespace rejects workspace access.
 
+## AgentCore Memory and personalization
+
+Phase 2 also creates one persistent `AWS::BedrockAgentCore::Memory` resource.
+It retains events for 90 days and has two long-term extraction strategies:
+
+- `USER_PREFERENCE` writes actor-wide preferences under
+  `/users/{actorId}/preferences/`.
+- `SUMMARIZATION` writes session summaries under
+  `/users/{actorId}/summaries/{sessionId}/`.
+
+The runtime maps the authenticated AgentCore `runtimeUserId` to `actorId` and
+uses `context.session_id` as `sessionId`. The browser payload is not trusted
+for either identity. Retrieved records are bounded and inserted into the
+prompt as explicitly untrusted context; Memory IAM permissions are scoped to
+the created resource.
+
+These stores have distinct responsibilities:
+
+- AgentCore Memory stores conversational events and extracted personalization,
+  such as preferences and prior-session summaries.
+- The workspace bucket/S3 stores files, skills, and Hermes' local workspace
+  state. It is not a substitute for long-term conversational memory.
+- The Knowledge Base stores authoritative product documents and supplies the
+  evidence used to answer product questions. It is not a user profile store.
+
+Long-term extraction is asynchronous. A successful turn is written once as a
+`USER` plus `ASSISTANT` event after the response stream completes, but a later
+read in the same request is intentionally not attempted. A preference may
+become searchable only after the extraction delay and is normally demonstrated
+in a subsequent conversation or session.
+
+Memory failures, a missing `AGENTCORE_MEMORY_ID`, a resource still being
+created, and a failed or timed-out readiness check are silent to the user. The
+runtime continues with the Knowledge Base and normal chat response, and a
+later invocation may retry Memory readiness.
+
+To demonstrate the path in an authorized environment:
+
+1. In one authenticated session, say a durable preference explicitly, for
+   example: “Prefiro respostas curtas e em português.”
+2. Wait for asynchronous extraction; do not expect the preference immediately
+   in the same response.
+3. Start a new session for the same user and ask a related question. The
+   runtime should retrieve a bounded preference record while continuing to
+   ground product facts in the Knowledge Base.
+4. Repeat with the second test user. Their actor-scoped namespace must not
+   retrieve the first user's preference.
+
+The Memory API uses the control-plane `bedrock-agentcore-control` client for
+readiness checks and the data-plane `bedrock-agentcore` client for events and
+records. See the [official Memory SDK guide](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agentcore-sdk-memory.html)
+and [namespace guidance](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/specify-long-term-memory-organization.html)
+for the service-level contracts.
+
 Persisted skills are instructions only. The only accepted skill file is
 `skills/<name>/SKILL.md`, where `<name>` is a bounded opaque-safe directory
 name and the Markdown is valid bounded UTF-8 text. Python, shell, binary, and

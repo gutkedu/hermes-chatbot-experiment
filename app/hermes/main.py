@@ -16,6 +16,7 @@ import os
 import signal
 import sys
 import asyncio
+import inspect
 from typing import Any
 
 def _get_region() -> str:
@@ -29,6 +30,7 @@ from bedrock_agentcore.runtime import BedrockAgentCoreApp  # noqa: E402
 from bridge.bedrock_compat import install_nova_bedrock_compat  # noqa: E402
 from bridge.model_config import resolve_bedrock_settings  # noqa: E402
 from bridge.streaming import stream_conversation  # noqa: E402
+from bridge.memory import MemoryBridge  # noqa: E402
 from bridge.workspace_sync import (  # noqa: E402
     NamespaceBindingError,
     WorkspaceSync,
@@ -51,6 +53,7 @@ _workspace_namespace: str | None = None
 _workspace_runtime_session: str | None = None
 _scoped_credentials: Any | None = None
 _persistence_disabled_logged = False
+_memory_bridge: MemoryBridge | None = None
 
 
 def _runtime_session_id(context: Any) -> str:
@@ -60,6 +63,64 @@ def _runtime_session_id(context: Any) -> str:
     if isinstance(context, dict):
         return str(context.get("session_id") or context.get("runtime_session_id") or "")
     return str(getattr(context, "session_id", "") or getattr(context, "runtime_session_id", "") or "")
+
+
+def _runtime_user_id(context: Any) -> str:
+    """Read the authenticated AgentCore runtime user, never the payload."""
+    if context is None:
+        return ""
+
+    values: dict[str, Any] = {}
+    if isinstance(context, dict):
+        values.update(context)
+    else:
+        for name in ("runtime_user_id", "runtimeUserId", "user_id", "userId"):
+            value = getattr(context, name, None)
+            if value:
+                return str(value)
+        headers = getattr(context, "request_headers", None)
+        if isinstance(headers, dict):
+            values.update(headers)
+
+    headers = values.get("request_headers") or values.get("requestHeaders")
+    if isinstance(headers, dict):
+        values.update(headers)
+    for key, value in values.items():
+        normalized = str(key).lower().replace("_", "-")
+        if normalized in {
+            "runtime-user-id",
+            "runtimeuserid",
+            "x-amzn-bedrock-agentcore-runtime-user-id",
+            "x-amzn-bedrock-agentcore-runtime-custom-userid",
+        } and value:
+            return str(value)
+    return ""
+
+
+def _memory_for_invocation(actor_id: str, session_id: str) -> MemoryBridge | None:
+    """Return a configured bridge only when all authenticated identifiers exist."""
+    global _memory_bridge
+
+    memory_id = os.environ.get("AGENTCORE_MEMORY_ID", "").strip()
+    if not memory_id or not actor_id or not session_id:
+        return None
+    if _memory_bridge is not None and _memory_bridge.memory_id == memory_id:
+        return _memory_bridge
+    try:
+        _memory_bridge = MemoryBridge(memory_id, region_name=_get_region())
+    except Exception as exc:  # noqa: BLE001 - memory is optional at runtime
+        log.warning("AgentCore Memory setup failed (%s)", type(exc).__name__)
+        _memory_bridge = None
+        return None
+    return _memory_bridge
+
+
+async def _call_memory(method: Any, *args: Any) -> Any:
+    """Run blocking boto3 memory calls off the event-loop thread."""
+    result = await asyncio.to_thread(method, *args)
+    if inspect.isawaitable(result):
+        return await result
+    return result
 
 
 def _workspace_for_invocation(payload: dict[str, Any], context: Any) -> WorkspaceSync | None:
@@ -188,6 +249,8 @@ async def invoke(payload, context):
     prompt = payload.get("prompt", "")
     channel = payload.get("channel", "agentcore")
     message = payload.get("message", prompt)
+    session_id = _runtime_session_id(context)
+    actor_id = _runtime_user_id(context)
 
     try:
         if not message or not message.strip():
@@ -209,6 +272,14 @@ async def invoke(payload, context):
         if retrieval.context is None:
             yield json.dumps({"type": "delta", "text": "Não há evidência suficiente na base de conhecimento para responder a esta pergunta."})
             return
+
+        memory = _memory_for_invocation(actor_id, session_id)
+        memory_context = ""
+        if memory is not None:
+            try:
+                memory_context = await _call_memory(memory.retrieve_context, actor_id, message) or ""
+            except Exception as exc:  # noqa: BLE001 - memory must not interrupt chat
+                log.warning("AgentCore Memory context retrieval failed (%s)", type(exc).__name__)
         agent = get_or_create_agent()
 
         system_extra = (
@@ -216,6 +287,8 @@ async def invoke(payload, context):
             "If the evidence does not answer the question, say there is insufficient evidence.\n\n"
             f"{retrieval.context}"
         )
+        if memory_context:
+            system_extra = f"{memory_context}\n\n{system_extra}"
         if sync is not None:
             skill_prompt = _skill_instructions_prompt(load_skill_instructions(sync.workspace))
             if skill_prompt:
@@ -227,13 +300,28 @@ async def invoke(payload, context):
         # agent has context from previous turns.
         history = payload.get("conversationHistory") or None
 
+        assistant_parts: list[str] = []
         async for delta in stream_conversation(
             agent,
             user_message=message,
             system_message=system_extra,
             conversation_history=history,
         ):
+            assistant_parts.append(delta)
             yield json.dumps({"type": "delta", "text": delta})
+        # Do not start a second readiness timeout after a failed retrieval in
+        # this same invocation. A subsequent invocation will retry readiness.
+        if memory is not None and assistant_parts and getattr(memory, "is_ready", True):
+            try:
+                await _call_memory(
+                    memory.record_turn,
+                    actor_id,
+                    session_id,
+                    message,
+                    "".join(assistant_parts),
+                )
+            except Exception as exc:  # noqa: BLE001 - persistence must not interrupt chat
+                log.warning("AgentCore Memory turn recording failed (%s)", type(exc).__name__)
         yield json.dumps({"type": "sources", "sources": retrieval.sources})
     except Exception as exc:  # noqa: BLE001 - return a safe user-facing response
         log.error("Agent invocation failed (%s)", type(exc).__name__)
