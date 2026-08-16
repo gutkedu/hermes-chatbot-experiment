@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # --------------------------------------------------------------------------
-# Deploy Hermes, its Knowledge Base, and the authenticated web chat.
+# Deploy Hermes direct chat and the authenticated web chat.
 #
 # Usage:
-#   ./scripts/deploy.sh           # Run base, Knowledge Base/runtime, and web phases
+#   ./scripts/deploy.sh           # Run base, runtime, and web phases
 #   ./scripts/deploy.sh phase1    # CDK base stacks only
-#   ./scripts/deploy.sh phase2    # Knowledge Base + CDK-built AgentCore runtime
+#   ./scripts/deploy.sh phase2    # CDK-built AgentCore runtime
 #   ./scripts/deploy.sh phase3    # Web/API stack only
 #   ./scripts/deploy.sh cdk-only  # CDK stacks only (identical to all)
 # --------------------------------------------------------------------------
@@ -78,10 +78,10 @@ phase1() {
 }
 
 # --------------------------------------------------------------------------
-# Phase 2: Knowledge Base and explicit AgentCore runtime
+# Phase 2: explicit AgentCore runtime
 # --------------------------------------------------------------------------
 phase2() {
-    info "=== Phase 2: Knowledge Base + AgentCore Runtime ==="
+    info "=== Phase 2: AgentCore Runtime ==="
 
     # Copy hermes-agent source into the app/hermes/ Docker build context.
     if [ ! -d "$PROJECT_DIR/app/hermes/hermes-agent" ]; then
@@ -99,7 +99,7 @@ phase2() {
     rsync -a --delete --exclude='__pycache__' --exclude='Dockerfile' --exclude='memory.py' \
         "$PROJECT_DIR/bridge/" "$PROJECT_DIR/app/hermes/bridge/"
 
-    $CDK deploy "${PROJECT_NAME}-knowledge-base" "${PROJECT_NAME}-runtime" --require-approval never
+    $CDK deploy "${PROJECT_NAME}-runtime" --require-approval never
 
     info "Phase 2 complete."
 }

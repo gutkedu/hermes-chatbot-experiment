@@ -1,8 +1,7 @@
 # Authenticated web chat runbook
 
 This runbook is for an AWS account where the operator is authorized to create
-and remove Cognito, CloudFront, S3, API Gateway, Lambda, AgentCore, and the
-private Knowledge Base resources.
+and remove Cognito, CloudFront, S3, API Gateway, Lambda, and AgentCore
 resources. The local verifier is credential-free; the smoke test below is the
 authorized-environment check.
 
@@ -18,8 +17,9 @@ authorized-environment check.
    ./scripts/deploy.sh phase3
    ```
 
-   Phase 2 creates the private document bucket, S3 Vectors index, Knowledge
-   Base, and AgentCore runtime. It does not ingest documents automatically.
+   Phase 2 creates the AgentCore runtime, workspace bucket, and persistent
+   Memory. The runtime answers directly through the configured Bedrock model;
+   there is no document ingestion step.
    Phase 3 deploys only the `hermes-agentcore-web` stack. It prints the
    CloudFront site URL, streaming API URL, Cognito domain, and public web
    client ID.
@@ -46,30 +46,10 @@ authorized-environment check.
 
 ## Verify authentication and streaming
 
-## Ingest and verify product evidence
-
-The seed document is `knowledge-base/lumen-desk-lamp.md`. To upload a revised
-version, copy it under the `knowledge-base/` prefix in the `DocumentsBucketName`
-output, then deliberately start ingestion:
-
-```bash
-./scripts/ingest_knowledge_base.sh
-```
-
-After the command reports `COMPLETE`, verify retrieval without exposing the
-private source object:
-
-```bash
-aws bedrock-agent-runtime retrieve \
-  --knowledge-base-id "$(aws cloudformation describe-stacks --stack-name hermes-agentcore-knowledge-base --query 'Stacks[0].Outputs[?OutputKey==`KnowledgeBaseId`].OutputValue' --output text)" \
-  --retrieval-query 'text=Qual é o prazo de devolução da luminária Lumen?' \
-  --retrieval-configuration 'vectorSearchConfiguration={numberOfResults=3,overrideSearchType=SEMANTIC}'
-```
-
-The retrieved text must state “30 dias corridos após a entrega”. Then send the
-same question through the authenticated chat. The assistant should state that
-answer and render one citation with the document title and excerpt; it must not
-expose a bucket URL or download link.
+After sign-in, send a normal support question through the authenticated chat.
+The answer is generated directly by the configured Bedrock model and should
+arrive as incremental `message.delta` events. The browser contract contains no
+document citations or retrieval-specific status.
 
 The BFF derives opaque AgentCore session and user IDs from the Cognito `iss`
 and `sub` claims. It never accepts a browser-provided session identifier.
@@ -82,7 +62,7 @@ derived from the AgentCore `runtimeSessionId`; the runtime validates the
 binding against `context.session_id`. The browser may send only `message` and
 cannot select a session, namespace, S3 key, or skill path.
 
-The runtime restores the namespace before retrieval or agent creation, starts
+The runtime restores the namespace before agent creation, starts
 periodic saves using `WORKSPACE_SYNC_INTERVAL` (300 seconds by default), saves
 after each invocation, and attempts one final synchronous save during
 shutdown. Individual S3 download/upload failures are logged as safe error
@@ -115,8 +95,8 @@ These stores have distinct responsibilities:
   such as preferences and prior-session summaries.
 - The workspace bucket/S3 stores files, skills, and Hermes' local workspace
   state. It is not a substitute for long-term conversational memory.
-- The Knowledge Base stores authoritative product documents and supplies the
-  evidence used to answer product questions. It is not a user profile store.
+- The Bedrock model answers the current request directly. AgentCore Memory is
+  the only persistent conversational context source in this experiment.
 
 Long-term extraction is asynchronous. A successful turn is written once as a
 `USER` plus `ASSISTANT` event after the response stream completes, but a later
@@ -126,8 +106,8 @@ in a subsequent conversation or session.
 
 Memory failures, a missing `AGENTCORE_MEMORY_ID`, a resource still being
 created, and a failed or timed-out readiness check are silent to the user. The
-runtime continues with the Knowledge Base and normal chat response, and a
-later invocation may retry Memory readiness.
+runtime continues with a direct chat response, and a later invocation may
+retry Memory readiness.
 
 To demonstrate the path in an authorized environment:
 
@@ -136,8 +116,8 @@ To demonstrate the path in an authorized environment:
 2. Wait for asynchronous extraction; do not expect the preference immediately
    in the same response.
 3. Start a new session for the same user and ask a related question. The
-   runtime should retrieve a bounded preference record while continuing to
-   ground product facts in the Knowledge Base.
+   runtime should retrieve a bounded preference record and use it as
+   explicitly untrusted personalization context for the direct response.
 4. Repeat with the second test user. Their actor-scoped namespace must not
    retrieve the first user's preference.
 
@@ -195,7 +175,8 @@ When the demonstration is complete, run the interactive teardown (or
 
 The destroyable web bucket, CloudFront distribution, API, Lambda, and Hosted UI
 resources are removed with `hermes-agentcore-web`. The Cognito user pool is
-retained so it can be reused by the web application. The teardown script then
-deletes the retained S3 Vectors index and vector bucket in that order; it does
-not print document contents, tokens, or credentials. The web-only deployment
-does not create a dedicated KMS key or channel secrets.
+retained so it can be reused by the web application. The teardown does not
+manage any Knowledge Base or vector-store resources because the simplified
+deployment does not create them. It does not print document contents, tokens,
+or credentials. The web-only deployment does not create a dedicated KMS key or
+channel secrets.

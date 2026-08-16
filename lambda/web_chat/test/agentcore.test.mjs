@@ -26,25 +26,22 @@ test('AgentCore event-stream lines split across chunks are reassembled', async (
   assert.deepEqual(await collect(parseAgentCoreStream(body, 'text/event-stream')), ['Hello']);
 });
 
-test('AgentCore JSON envelopes preserve delta and source events', async () => {
+test('AgentCore JSON envelopes preserve delta events and ignore source events', async () => {
   const body = Readable.from([
     Buffer.from('data: {"type":"delta","text":"30 dias"}\n\n'),
     Buffer.from('data: {"type":"sources","sources":[{"title":"Lumen","identifier":"lumen.md","excerpt":"30 dias"}]}\n\n'),
   ]);
   assert.deepEqual(await collect(parseAgentCoreStream(body, 'text/event-stream')), [
     { type: 'delta', text: '30 dias' },
-    { type: 'sources', sources: [{ title: 'Lumen', identifier: 'lumen.md', excerpt: '30 dias' }] },
   ]);
 });
 
-test('quoted AgentCore JSON envelopes are decoded before routing', async () => {
+test('quoted AgentCore delta envelopes are decoded before routing', async () => {
   const body = Readable.from([
     Buffer.from('data: "{\\"type\\":\\"delta\\",\\"text\\":\\"30 dias\\"}"\n\n'),
-    Buffer.from('data: "{\\"type\\":\\"sources\\",\\"sources\\":[{\\"title\\":\\"Lumen\\",\\"identifier\\":\\"lumen.md\\",\\"excerpt\\":\\"30 dias\\"}]}"\n\n'),
   ]);
   assert.deepEqual(await collect(parseAgentCoreStream(body, 'text/event-stream')), [
     { type: 'delta', text: '30 dias' },
-    { type: 'sources', sources: [{ title: 'Lumen', identifier: 'lumen.md', excerpt: '30 dias' }] },
   ]);
 });
 

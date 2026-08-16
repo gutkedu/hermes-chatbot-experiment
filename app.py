@@ -2,7 +2,7 @@
 """CDK app entry point for Hermes-Agent on Amazon Bedrock AgentCore.
 
 Instantiates the web-only stacks in dependency order, including the explicit
-AgentCore runtime and its private product Knowledge Base.
+AgentCore runtime.
 
 Router, cron, observability, token monitoring, and guardrails remain
 available as opt-in stacks through CDK context flags, but are disabled by
@@ -16,7 +16,6 @@ import aws_cdk as cdk
 from stacks.security_stack import HermesSecurityStack
 from stacks.guardrails_stack import HermesGuardrailsStack
 from stacks.agentcore_stack import HermesAgentCoreStack
-from stacks.knowledge_base_stack import HermesKnowledgeBaseStack
 from stacks.runtime_stack import HermesRuntimeStack
 from stacks.observability_stack import HermesObservabilityStack
 from stacks.router_stack import HermesRouterStack
@@ -51,18 +50,14 @@ agentcore_stack = HermesAgentCoreStack(
     app,
     f"{project}-agentcore",
 )
-knowledge_base_stack = HermesKnowledgeBaseStack(app, f"{project}-knowledge-base")
 runtime_stack = HermesRuntimeStack(
     app,
     f"{project}-runtime",
     execution_role=agentcore_stack.execution_role,
-    knowledge_base_id=knowledge_base_stack.knowledge_base.ref,
-    knowledge_base_arn=knowledge_base_stack.knowledge_base.get_att("KnowledgeBaseArn").to_string(),
     workspace_bucket_name=agentcore_stack.bucket.bucket_name,
     memory_id=agentcore_stack.memory.get_att("MemoryId").to_string(),
 )
 runtime_stack.add_dependency(agentcore_stack)
-runtime_stack.add_dependency(knowledge_base_stack)
 
 enable_token_monitoring = context_bool("enable_token_monitoring")
 enable_observability = enable_token_monitoring or context_bool("enable_observability")

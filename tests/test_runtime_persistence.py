@@ -73,19 +73,13 @@ def test_restore_precedes_agent_creation_and_skills_are_delimited(runtime, monke
     events: list[str] = []
     sync = _Sync(events, tmp_path)
     monkeypatch.setenv("S3_BUCKET", "workspace-bucket")
-    monkeypatch.setenv("KNOWLEDGE_BASE_ID", "kb-id")
     runtime.WorkspaceSync = lambda **kwargs: sync
     monkeypatch.setattr(runtime, "load_skill_instructions", lambda workspace: ["# safe skill\nDo not execute this."])
-
-    async def retrieve(*args):
-        events.append("retrieve")
-        return types.SimpleNamespace(context="evidence", sources=[])
 
     async def stream(agent, **kwargs):
         events.append(f"agent:{kwargs['system_message']}")
         yield "answer"
 
-    monkeypatch.setattr(runtime, "retrieve_context", retrieve)
     monkeypatch.setattr(runtime, "get_or_create_agent", lambda: events.append("create") or object())
     monkeypatch.setattr(runtime, "stream_conversation", stream)
 
@@ -94,7 +88,7 @@ def test_restore_precedes_agent_creation_and_skills_are_delimited(runtime, monke
     assert output[0].startswith('{"type": "delta"')
     assert events[0] == f"restore:{NAMESPACE}"
     assert events[1] == f"periodic:{NAMESPACE}"
-    assert events.index("create") > events.index("retrieve")
+    assert events.index("create") > events.index(f"periodic:{NAMESPACE}")
     system_message = next(value for value in events if value.startswith("agent:"))
     assert "BEGIN PERSISTED SKILL INSTRUCTIONS" in system_message
     assert "# safe skill" in system_message
@@ -102,10 +96,9 @@ def test_restore_precedes_agent_creation_and_skills_are_delimited(runtime, monke
     assert events[-1] == f"save:{NAMESPACE}"
 
 
-def test_invalid_namespace_blocks_retrieval_and_agent(runtime, monkeypatch):
+def test_invalid_namespace_blocks_workspace_and_agent(runtime, monkeypatch):
     monkeypatch.setenv("S3_BUCKET", "workspace-bucket")
     monkeypatch.setattr(runtime, "WorkspaceSync", lambda **kwargs: pytest.fail("must validate before constructing sync"))
-    monkeypatch.setattr(runtime, "retrieve_context", pytest.fail)
 
     with pytest.raises(Exception, match="workspace namespace"):
         _collect(runtime.invoke({"message": "hello", "workspaceNamespace": "../user"}, types.SimpleNamespace(session_id=SESSION)))
@@ -115,10 +108,8 @@ def test_final_save_is_attempted_when_agent_stream_fails(runtime, monkeypatch, t
     events: list[str] = []
     sync = _Sync(events, tmp_path)
     monkeypatch.setenv("S3_BUCKET", "workspace-bucket")
-    monkeypatch.setenv("KNOWLEDGE_BASE_ID", "kb-id")
     runtime.WorkspaceSync = lambda **kwargs: sync
     monkeypatch.setattr(runtime, "load_skill_instructions", lambda workspace: [])
-    monkeypatch.setattr(runtime, "retrieve_context", lambda *args: asyncio.sleep(0, result=types.SimpleNamespace(context="evidence", sources=[])))
     monkeypatch.setattr(runtime, "get_or_create_agent", lambda: object())
 
     async def broken_stream(*args, **kwargs):
@@ -135,7 +126,6 @@ def test_final_save_is_attempted_when_agent_stream_fails(runtime, monkeypatch, t
 def test_memory_is_retrieved_before_response_and_recorded_after_complete_stream(runtime, monkeypatch):
     events: list[str] = []
     monkeypatch.delenv("S3_BUCKET", raising=False)
-    monkeypatch.setenv("KNOWLEDGE_BASE_ID", "kb-id")
     monkeypatch.setenv("AGENTCORE_MEMORY_ID", "memory-id")
 
     class Memory:
@@ -148,7 +138,6 @@ def test_memory_is_retrieved_before_response_and_recorded_after_complete_stream(
             return True
 
     monkeypatch.setattr(runtime, "MemoryBridge", lambda *args, **kwargs: Memory())
-    monkeypatch.setattr(runtime, "retrieve_context", lambda *args: asyncio.sleep(0, result=types.SimpleNamespace(context="evidence", sources=[])))
 
     async def stream(agent, **kwargs):
         events.append(f"agent:{kwargs['system_message']}")
@@ -174,12 +163,12 @@ def test_memory_is_retrieved_before_response_and_recorded_after_complete_stream(
     system_message = next(value for value in events if value.startswith("agent:"))
     assert "preference" in system_message
     assert "untrusted-payload-user" not in system_message
+    assert "retrieved evidence" not in system_message.lower()
 
 
 def test_memory_failure_does_not_stop_response_stream(runtime, monkeypatch):
     events: list[str] = []
     monkeypatch.delenv("S3_BUCKET", raising=False)
-    monkeypatch.setenv("KNOWLEDGE_BASE_ID", "kb-id")
     monkeypatch.setenv("AGENTCORE_MEMORY_ID", "memory-id")
 
     class BrokenMemory:
@@ -190,7 +179,6 @@ def test_memory_failure_does_not_stop_response_stream(runtime, monkeypatch):
             raise RuntimeError("memory down")
 
     monkeypatch.setattr(runtime, "MemoryBridge", lambda *args, **kwargs: BrokenMemory())
-    monkeypatch.setattr(runtime, "retrieve_context", lambda *args: asyncio.sleep(0, result=types.SimpleNamespace(context="evidence", sources=[])))
     monkeypatch.setattr(runtime, "get_or_create_agent", lambda: object())
 
     async def stream(agent, **kwargs):
@@ -203,3 +191,20 @@ def test_memory_failure_does_not_stop_response_stream(runtime, monkeypatch):
 
     assert any('"text": "answer"' in item for item in output)
     assert events == ["generated"]
+
+
+def test_direct_chat_does_not_require_knowledge_base_configuration(runtime, monkeypatch):
+    monkeypatch.delenv("KNOWLEDGE_BASE_ID", raising=False)
+    monkeypatch.delenv("AGENTCORE_MEMORY_ID", raising=False)
+    monkeypatch.setattr(runtime, "get_or_create_agent", lambda: object())
+
+    async def stream(agent, **kwargs):
+        assert "retrieved" not in kwargs["system_message"].lower()
+        yield "direct answer"
+
+    monkeypatch.setattr(runtime, "stream_conversation", stream)
+
+    output = _collect(runtime.invoke({"message": "hello"}, types.SimpleNamespace(session_id=SESSION)))
+
+    assert any('"text": "direct answer"' in item for item in output)
+    assert all('"type": "sources"' not in item for item in output)

@@ -9,7 +9,7 @@
 #
 # Destruction order (reverse of deploy):
 #   1. CDK stacks (web plus any legacy optional stacks)
-#   2. AgentCore runtime and Knowledge Base
+#   2. AgentCore runtime
 #   3. Base CDK stacks (agentcore and security)
 #   4. Legacy retained resources (S3, DynamoDB, KMS, secrets)
 #
@@ -108,7 +108,6 @@ for STACK in \
     "${PROJECT_NAME}-cron" \
     "${PROJECT_NAME}-router" \
     "${PROJECT_NAME}-runtime" \
-    "${PROJECT_NAME}-knowledge-base" \
     "${PROJECT_NAME}-observability" \
     "${PROJECT_NAME}-agentcore" \
     "${PROJECT_NAME}-guardrails" \
@@ -127,7 +126,6 @@ echo "  - Cognito:  ${PROJECT_NAME}-users"
 echo ""
 info "Legacy retained resources to delete:"
 echo "  - S3:       ${PROJECT_NAME}-user-files-${ACCOUNT}-${REGION}"
-echo "  - S3 Vectors: inspect the KnowledgeBase stack output before manual cleanup"
 echo "  - DynamoDB: ${PROJECT_NAME}-identity"
 echo "  - KMS:      alias/${PROJECT_NAME}"
 echo ""
@@ -180,10 +178,10 @@ info "Phase 3 stacks destroyed."
 # Step 3: Destroy Phase 2 AgentCore runtime
 # --------------------------------------------------------------------------
 
-step "3/5  Destroying Phase 2 (AgentCore runtime and Knowledge Base) …"
+step "3/5  Destroying Phase 2 (AgentCore runtime) …"
 
-$CDK destroy "${PROJECT_NAME}-runtime" "${PROJECT_NAME}-knowledge-base" --force 2>/dev/null \
-    || warn "The runtime or Knowledge Base stack may already be deleted."
+$CDK destroy "${PROJECT_NAME}-runtime" --force 2>/dev/null \
+    || warn "The runtime stack may already be deleted."
 
 # Clean up ECR repository if it was created by the toolkit.
 ECR_REPO=$(aws ecr describe-repositories --query "repositories[?contains(repositoryName, 'hermes')].repositoryName" --output text 2>/dev/null || echo "")
@@ -243,13 +241,7 @@ else
     info "S3 bucket $BUCKET does not exist."
 fi
 
-# 4b. S3 Vectors — delete the index before its vector bucket. These are
-# retained by CloudFormation because a non-empty vector bucket cannot be
-# deleted by the service during stack deletion.
-warn "S3 Vectors resources use a CloudFormation-generated bucket name and are retained."
-warn "Delete its index, then its vector bucket, with the S3 Vectors console after stack teardown."
-
-# 4c. DynamoDB table.
+# 4b. DynamoDB table.
 TABLE="${PROJECT_NAME}-identity"
 if aws dynamodb describe-table --table-name "$TABLE" &>/dev/null 2>&1; then
     info "Deleting DynamoDB table: $TABLE"
