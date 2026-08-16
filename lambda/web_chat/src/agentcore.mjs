@@ -39,6 +39,10 @@ function textFromData(value) {
 }
 
 function eventFromData(value) {
+  if (typeof value === 'string') {
+    const nested = decodeData(value);
+    if (nested !== value) return eventFromData(nested);
+  }
   if (value && typeof value === 'object' && (value.type === 'delta' || value.type === 'sources')) return value;
   const text = textFromData(value);
   return text || null;
