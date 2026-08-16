@@ -54,13 +54,18 @@ class HermesCronStack(Stack):
         )
 
         # Allow Lambda to invoke AgentCore.
+        runtime_resources = (
+            [agentcore_runtime_arn, f"{agentcore_runtime_arn}/*"]
+            if agentcore_runtime_arn
+            else ["*"]
+        )
         self.cron_fn.add_to_role_policy(
             iam.PolicyStatement(
                 actions=[
                     "bedrock:InvokeAgentRuntime",
                     "bedrock-agentcore:InvokeAgentRuntime",
                 ],
-                resources=["*"],
+                resources=runtime_resources,
             )
         )
 

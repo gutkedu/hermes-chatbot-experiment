@@ -92,6 +92,11 @@ class HermesRouterStack(Stack):
         self.identity_table.grant_read_write_data(self.router_fn)
 
         # Allow Lambda to invoke AgentCore runtime.
+        runtime_resources = (
+            [agentcore_runtime_arn, f"{agentcore_runtime_arn}/*"]
+            if agentcore_runtime_arn
+            else ["*"]
+        )
         self.router_fn.add_to_role_policy(
             iam.PolicyStatement(
                 actions=[
@@ -99,7 +104,7 @@ class HermesRouterStack(Stack):
                     "bedrock-agentcore:InvokeAgentRuntime",
                     "bedrock-agentcore:InvokeAgentRuntimeForUser",
                 ],
-                resources=["*"],  # Scoped at the API call level via ARN param.
+                resources=runtime_resources,
             )
         )
 
@@ -127,7 +132,7 @@ class HermesRouterStack(Stack):
         self.router_fn.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["s3:PutObject"],
-                resources=[f"arn:aws:s3:::{bucket_name}/*"],
+                resources=[f"arn:aws:s3:::{bucket_name}/uploads/*"],
             )
         )
 

@@ -43,6 +43,7 @@ class HermesAgentCoreStack(Stack):
             encryption=s3.BucketEncryption.S3_MANAGED,
             block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
             versioned=True,
+            enforce_ssl=True,
             removal_policy=RemovalPolicy.RETAIN,
             lifecycle_rules=[
                 s3.LifecycleRule(
@@ -66,6 +67,19 @@ class HermesAgentCoreStack(Stack):
                     "ArnLike": {"aws:SourceArn": Fn.sub("arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:runtime/*")},
                 },
             ),
+        )
+        self.execution_role.assume_role_policy.add_statements(
+            iam.PolicyStatement(
+                sid="AllowRuntimeRoleToRefreshScopedSessions",
+                actions=["sts:AssumeRole"],
+                principals=[iam.AccountPrincipal(account).with_conditions({
+                    "ArnEquals": {
+                        "aws:PrincipalArn": Fn.sub(
+                            f"arn:${{AWS::Partition}}:iam::${{AWS::AccountId}}:role/{project}-execution-role"
+                        ),
+                    },
+                })],
+            )
         )
 
         # Bedrock model invocation.
@@ -93,8 +107,23 @@ class HermesAgentCoreStack(Stack):
             )
         )
 
-        # S3 — user files bucket.
-        self.bucket.grant_read_write(self.execution_role)
+        # S3 — workspace objects only. The runtime receives an additional
+        # short-lived STS session policy for the concrete ws-* namespace.
+        self.execution_role.add_to_policy(
+            iam.PolicyStatement(
+                sid="WorkspaceObjectsByOpaquePrefix",
+                actions=["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+                resources=[self.bucket.arn_for_objects("ws-*/*")],
+            )
+        )
+        self.execution_role.add_to_policy(
+            iam.PolicyStatement(
+                sid="WorkspaceListByOpaquePrefix",
+                actions=["s3:ListBucket"],
+                resources=[self.bucket.bucket_arn],
+                conditions={"StringLike": {"s3:prefix": ["ws-*/*"]}},
+            )
+        )
 
         # STS — self-assume for scoped credentials.
         self.execution_role.add_to_policy(

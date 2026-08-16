@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 
 from aws_cdk import App
-from aws_cdk.assertions import Template
+from aws_cdk.assertions import Match, Template
 
 from stacks.agentcore_stack import HermesAgentCoreStack
 from stacks.security_stack import HermesSecurityStack
@@ -86,6 +86,39 @@ def test_agentcore_stack_has_no_vpc_or_security_group_resources() -> None:
         for resource in template.to_json().get("Resources", {}).values()
     }
     assert not any(resource_type.startswith("AWS::EC2::") for resource_type in resource_types)
+
+
+def test_agentcore_workspace_bucket_is_private_versioned_and_prefix_scoped() -> None:
+    app = App(context={"project_name": "hermes-test"})
+    template = Template.from_stack(HermesAgentCoreStack(app, "AgentCore"))
+    template.has_resource_properties("AWS::S3::Bucket", {
+        "BucketEncryption": Match.any_value(),
+        "PublicAccessBlockConfiguration": Match.object_like({"BlockPublicAcls": True}),
+        "VersioningConfiguration": {"Status": "Enabled"},
+    })
+    policies = json.dumps(template.find_resources("AWS::IAM::Policy"))
+    assert "s3:*" not in policies
+    assert "s3:ListBucket" in policies
+    assert "ws-*/*" in policies
+    assert "grant_read_write" not in policies
+
+
+def test_runtime_receives_workspace_bucket_and_execution_role_configuration() -> None:
+    stack_names = _synth_stack_names()
+    assert "hermes-agentcore-runtime" in stack_names
+    with tempfile.TemporaryDirectory() as output_dir:
+        command = [
+            str(CDK), "synth", "hermes-agentcore-runtime", "--app",
+            f"{PYTHON} {ROOT / 'app.py'}", "--output", output_dir, "--quiet",
+        ]
+        environment = os.environ.copy()
+        environment["CDK_DISABLE_VERSION_CHECK"] = "1"
+        subprocess.run(command, cwd=ROOT, check=True, env=environment, capture_output=True, text=True)
+        template = json.loads((Path(output_dir) / "hermes-agentcore-runtime.template.json").read_text())
+    runtime = next(value for value in template["Resources"].values() if value["Type"] == "AWS::BedrockAgentCore::Runtime")
+    variables = runtime["Properties"]["EnvironmentVariables"]
+    assert "S3_BUCKET" in variables
+    assert "EXECUTION_ROLE_ARN" in variables
 
 
 def test_token_monitoring_remains_synthesizable_when_enabled() -> None:

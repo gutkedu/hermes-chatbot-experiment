@@ -57,6 +57,7 @@ async function* chatBody({ client, env, requestId, message, principal }) {
         channel: 'web',
         message,
         userId: identity.runtimeUserId,
+        workspaceNamespace: identity.workspaceNamespace,
       },
     });
     for await (const event of parseAgentCoreStream(

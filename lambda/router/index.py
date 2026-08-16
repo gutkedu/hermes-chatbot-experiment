@@ -110,7 +110,7 @@ def _handle_telegram(event: dict) -> dict:
 
     # Check allowlist.
     if not _is_allowed(actor_id):
-        logger.info("Blocked message from %s (not in allowlist)", actor_id)
+        logger.info("Blocked message not in allowlist")
         return _ok({"status": "blocked"})
 
     # Resolve hermes user.
@@ -131,7 +131,8 @@ def _handle_telegram(event: dict) -> dict:
         "images": images,
     }
 
-    agent_response = _invoke_agentcore(session_id, actor_id, payload)
+    payload["workspaceNamespace"] = _workspace_namespace(session_id)
+    agent_response = _invoke_agentcore(session_id, hermes_user_id, payload)
 
     # Send response back to Telegram.
     _send_telegram_message(chat_id, agent_response)
@@ -250,7 +251,8 @@ def _handle_slack(event: dict) -> dict:
         "message": text,
     }
 
-    agent_response = _invoke_agentcore(session_id, actor_id, payload)
+    payload["workspaceNamespace"] = _workspace_namespace(session_id)
+    agent_response = _invoke_agentcore(session_id, hermes_user_id, payload)
 
     # Send response back to Slack.
     _send_slack_message(channel_id, agent_response, slack_event.get("ts"))
@@ -420,9 +422,10 @@ def _discord_followup(ctx: dict) -> None:
         "message": text,
     }
 
-    logger.info("Discord followup: app_id=%s, actor=%s, text=%s", app_id, actor_id, text[:50])
+    payload["workspaceNamespace"] = _workspace_namespace(session_id)
+    logger.info("Discord followup received (app_id=%s, message_length=%d)", app_id, len(text))
 
-    agent_response = _invoke_agentcore(session_id, actor_id, payload)
+    agent_response = _invoke_agentcore(session_id, hermes_user_id, payload)
     logger.info("Discord followup: agent response length=%d", len(agent_response))
 
     # Edit the original deferred response via Discord webhook.
@@ -440,8 +443,8 @@ def _discord_followup(ctx: dict) -> None:
         resp = urllib.request.urlopen(req, timeout=30)
         logger.info("Discord followup: edit success, status=%d", resp.status)
     except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        logger.error("Discord followup edit failed: %s %s — %s", exc.code, exc.reason, body)
+        exc.read()
+        logger.error("Discord followup edit failed (status=%s)", exc.code)
     except Exception as exc:
         logger.error("Discord followup edit failed: %s", exc)
 
@@ -452,7 +455,7 @@ def _discord_followup(ctx: dict) -> None:
 
 def _handle_feishu(event: dict) -> dict:
     body = _parse_body(event)
-    logger.info("Feishu body: %s", json.dumps(body, ensure_ascii=False)[:2000])
+    logger.info("Feishu webhook received")
 
     # Feishu URL verification challenge.
     if body.get("type") == "url_verification":
@@ -500,7 +503,8 @@ def _handle_feishu(event: dict) -> dict:
         "message": text,
     }
 
-    agent_response = _invoke_agentcore(session_id, actor_id, payload)
+    payload["workspaceNamespace"] = _workspace_namespace(session_id)
+    agent_response = _invoke_agentcore(session_id, hermes_user_id, payload)
 
     # Reply via Feishu API.
     _send_feishu_message(chat_id, message.get("message_id", ""), agent_response)
@@ -615,7 +619,14 @@ def _save_history(session_id: str, user_message: str, assistant_message: str) ->
 # AgentCore invocation
 # --------------------------------------------------------------------------
 
-def _invoke_agentcore(session_id: str, actor_id: str, payload: dict) -> str:
+def _workspace_namespace(session_id: str) -> str:
+    """Derive the opaque workspace prefix from the backend-owned session."""
+    if not isinstance(session_id, str) or len(session_id) < 33 or "/" in session_id or ".." in session_id:
+        raise ValueError("invalid runtime session")
+    return "ws-" + hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+
+
+def _invoke_agentcore(session_id: str, runtime_user_id: str, payload: dict) -> str:
     """Call InvokeAgentRuntime and return the text response."""
     user_message = payload.get("message", "")
 
@@ -625,10 +636,11 @@ def _invoke_agentcore(session_id: str, actor_id: str, payload: dict) -> str:
         payload["conversationHistory"] = history
 
     try:
+        payload.setdefault("workspaceNamespace", _workspace_namespace(session_id))
         response = _agentcore().invoke_agent_runtime(
             agentRuntimeArn=RUNTIME_ARN,
             runtimeSessionId=session_id,
-            runtimeUserId=actor_id,
+            runtimeUserId=runtime_user_id,
             payload=json.dumps(payload).encode("utf-8"),
         )
 
@@ -659,8 +671,8 @@ def _invoke_agentcore(session_id: str, actor_id: str, payload: dict) -> str:
 
         return result
     except Exception as exc:
-        logger.exception("AgentCore invocation failed")
-        return f"Sorry, I couldn't process your message right now. ({exc})"
+        logger.error("AgentCore invocation failed (%s)", type(exc).__name__)
+        return "Sorry, I couldn't process your message right now."
 
 
 # --------------------------------------------------------------------------

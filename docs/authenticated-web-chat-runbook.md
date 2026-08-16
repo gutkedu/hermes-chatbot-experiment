@@ -74,6 +74,31 @@ expose a bucket URL or download link.
 The BFF derives opaque AgentCore session and user IDs from the Cognito `iss`
 and `sub` claims. It never accepts a browser-provided session identifier.
 
+## Workspace persistence and skills
+
+When `S3_BUCKET` is configured, the BFF/router sends an internal
+`workspaceNamespace` in the form `ws-<64 lowercase hex characters>`. It is
+derived from the AgentCore `runtimeSessionId`; the runtime validates the
+binding against `context.session_id`. The browser may send only `message` and
+cannot select a session, namespace, S3 key, or skill path.
+
+The runtime restores the namespace before retrieval or agent creation, starts
+periodic saves using `WORKSPACE_SYNC_INTERVAL` (300 seconds by default), saves
+after each invocation, and attempts one final synchronous save during
+shutdown. Individual S3 download/upload failures are logged as safe error
+types and do not stop the remaining files or the conversation. Logs never
+include file contents, prompts, model output, tokens, or credentials.
+
+Without `S3_BUCKET`, the runtime explicitly operates with an ephemeral
+workspace. With persistence enabled, a missing, malformed, traversal-like, or
+session-mismatched namespace rejects workspace access.
+
+Persisted skills are instructions only. The only accepted skill file is
+`skills/<name>/SKILL.md`, where `<name>` is a bounded opaque-safe directory
+name and the Markdown is valid bounded UTF-8 text. Python, shell, binary, and
+other files are ignored; Markdown is inserted into a clearly delimited prompt
+section and is never imported or executed.
+
 Run the smoke check with short-lived access tokens obtained through the
 authorized Cognito flow (the script reports status codes and delta counts, not
 token values):

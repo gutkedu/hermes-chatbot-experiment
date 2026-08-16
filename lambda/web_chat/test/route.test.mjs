@@ -56,6 +56,9 @@ test('valid chat emits started, deltas, and completed events', async () => {
   assert.match(body, /event: message.completed/);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].input.runtimeSessionId.startsWith('web-session-'), true);
+  const sentPayload = JSON.parse(Buffer.from(calls[0].input.payload).toString('utf8'));
+  assert.match(sentPayload.workspaceNamespace, /^ws-[a-f0-9]{64}$/);
+  assert.equal('runtimeSessionId' in sentPayload, false);
 });
 
 test('knowledge-base source envelopes become a bounded message.sources event', async () => {

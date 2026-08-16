@@ -46,6 +46,37 @@ def test_build_session_id():
     assert "telegram" in session_id
 
 
+def test_workspace_namespace_is_derived_from_the_opaque_runtime_session():
+    with patch("boto3.resource", return_value=mock_dynamodb_resource), \
+         patch("boto3.client"):
+        from index import _build_session_id, _workspace_namespace
+
+    session_id = _build_session_id("user_abc123", "telegram")
+    namespace = _workspace_namespace(session_id)
+    assert namespace.startswith("ws-")
+    assert len(namespace) == 67
+    assert _workspace_namespace(session_id) == namespace
+    assert "user_abc123" not in namespace
+
+
+def test_agentcore_invocation_uses_opaque_runtime_user_not_channel_actor():
+    fake = MagicMock()
+    fake.invoke_agent_runtime.return_value = {"response": "ok"}
+    with patch("boto3.resource", return_value=mock_dynamodb_resource), \
+         patch("boto3.client"):
+        from index import _build_session_id, _invoke_agentcore
+        import index
+
+    index._agentcore_client = fake
+    session_id = _build_session_id("user_abc123", "telegram")
+    _invoke_agentcore(session_id, "user-opaque", {"message": "hello"})
+
+    call = fake.invoke_agent_runtime.call_args.kwargs
+    assert call["runtimeUserId"] == "user-opaque"
+    assert call["runtimeUserId"] != "telegram:123"
+    assert json.loads(call["payload"])["workspaceNamespace"].startswith("ws-")
+
+
 def test_split_message():
     with patch("boto3.resource", return_value=mock_dynamodb_resource), \
          patch("boto3.client"):
