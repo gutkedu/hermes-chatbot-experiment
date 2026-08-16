@@ -66,12 +66,6 @@ async function* chatBody({ client, env, requestId, message, principal }) {
     )) {
       if (typeof event === 'string' && event) yield encodeSse('message.delta', { text: event });
       if (event.type === 'delta' && event.text) yield encodeSse('message.delta', { text: event.text });
-      if (event.type === 'sources' && Array.isArray(event.sources)) {
-        const sources = event.sources.slice(0, 3).map((source) => ({
-          title: String(source.title ?? ''), identifier: String(source.identifier ?? ''), excerpt: String(source.excerpt ?? ''),
-        }));
-        yield encodeSse('message.sources', { sources });
-      }
     }
     yield encodeSse('message.completed', { requestId });
   } catch (error) {

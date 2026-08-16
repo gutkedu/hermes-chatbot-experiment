@@ -23,12 +23,11 @@ test('deltas append to one assistant message without duplicating the user messag
   ]);
 });
 
-test('sources attach to the active assistant message', () => {
+test('source actions do not add citation fields to the active assistant message', () => {
   let state = reduce({ ...initialState, status: 'ready', accessToken: 'token' }, {
     type: 'SEND_STARTED', message: 'return policy',
   });
-  state = reduce(state, { type: 'SOURCES', sources: [{ title: 'Lumen', identifier: 'lumen.md', excerpt: '30 dias' }] });
-  assert.deepEqual(state.messages[1].sources, [{ title: 'Lumen', identifier: 'lumen.md', excerpt: '30 dias' }]);
+  assert.deepEqual(reduce(state, { type: 'SOURCES', sources: [{ title: 'Lumen', identifier: 'lumen.md', excerpt: '30 dias' }] }), state);
 });
 
 test('401 signs out and retry reuses the pending message', () => {

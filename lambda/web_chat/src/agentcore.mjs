@@ -43,7 +43,7 @@ function eventFromData(value) {
     const nested = decodeData(value);
     if (nested !== value) return eventFromData(nested);
   }
-  if (value && typeof value === 'object' && (value.type === 'delta' || value.type === 'sources')) return value;
+  if (value && typeof value === 'object' && value.type === 'delta') return value;
   const text = textFromData(value);
   return text || null;
 }

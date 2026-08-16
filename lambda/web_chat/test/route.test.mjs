@@ -61,15 +61,16 @@ test('valid chat emits started, deltas, and completed events', async () => {
   assert.equal('runtimeSessionId' in sentPayload, false);
 });
 
-test('knowledge-base source envelopes become a bounded message.sources event', async () => {
+test('source envelopes are not exposed through the browser contract', async () => {
   const client = { send: async () => ({
     contentType: 'text/event-stream',
     response: Readable.from([Buffer.from('data: {"type":"sources","sources":[{"title":"Lumen","identifier":"lumen.md","excerpt":"30 dias"}]}\n\n')]),
   }) };
   const response = await routeRequest(event(), { client, env, requestId: 'req-sources' });
   const body = await readBody(response.body);
-  assert.match(body, /event: message.sources/);
-  assert.match(body, /"title":"Lumen"/);
+  assert.doesNotMatch(body, /message\.sources/);
+  assert.doesNotMatch(body, /Lumen/);
+  assert.match(body, /event: message.completed/);
 });
 
 test('missing identity returns JSON 401 before streaming', async () => {

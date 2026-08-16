@@ -13,8 +13,10 @@ The default deployment is web-only:
 `CloudFront/S3 → API Gateway → Lambda → AgentCore Runtime (PUBLIC) → Bedrock`
 
 The default CDK synthesis contains the Cognito security stack, AgentCore base
-role and workspace bucket, the private product Knowledge Base, the explicit
-AgentCore runtime, and the authenticated web/API stack. VPC,
+role, workspace bucket, persistent Memory, explicit AgentCore runtime, and the
+authenticated web/API stack. The runtime answers directly through the
+configured Bedrock model; it does not provision or query a Knowledge Base,
+vector store, or retrieval service. VPC,
 NAT Gateway, private endpoints, ECS, Router, Cron, Observability, and Token
 Monitoring are not deployed. The latter stacks remain available for a later
 rollout through explicit CDK context flags.
@@ -48,7 +50,7 @@ npm ci --prefix lambda/web_chat
 ```
 
 The verifier runs the BFF and browser contract tests, Python tests, and `cdk
-synth`. It does not run `cdk deploy`, ingestion, or the real chat smoke test.
+synth`. It does not run `cdk deploy` or the real chat smoke test.
 For an authorized AWS smoke test after deployment, see
 [`scripts/verify_web_chat.sh`](scripts/verify_web_chat.sh) and the runbook.
 

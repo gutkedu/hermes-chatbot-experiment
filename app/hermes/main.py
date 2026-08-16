@@ -37,7 +37,6 @@ from bridge.workspace_sync import (  # noqa: E402
     load_skill_instructions,
     validate_workspace_namespace,
 )
-from retrieval import retrieve_context  # noqa: E402
 
 logger = logging.getLogger("hermes.agentcore")
 app = BedrockAgentCoreApp()
@@ -165,7 +164,7 @@ def _workspace_for_invocation(payload: dict[str, Any], context: Any) -> Workspac
         )
 
     sync = WorkspaceSync(**kwargs)
-    # This is intentionally before retrieval and before lazy agent creation.
+    # This is intentionally before lazy agent creation.
     sync.restore(namespace)
     sync.start_periodic_save(namespace)
     _workspace_sync = sync
@@ -257,22 +256,6 @@ async def invoke(payload, context):
             yield ""
             return
 
-        knowledge_base_id = os.environ.get("KNOWLEDGE_BASE_ID", "").strip()
-        if not knowledge_base_id:
-            log.error("KNOWLEDGE_BASE_ID is not configured")
-            yield json.dumps({"type": "delta", "text": "Não há evidência suficiente na base de conhecimento para responder a esta pergunta."})
-            return
-
-        import boto3
-        retrieval = await retrieve_context(
-            boto3.client("bedrock-agent-runtime", region_name=_get_region()),
-            knowledge_base_id,
-            message,
-        )
-        if retrieval.context is None:
-            yield json.dumps({"type": "delta", "text": "Não há evidência suficiente na base de conhecimento para responder a esta pergunta."})
-            return
-
         memory = _memory_for_invocation(actor_id, session_id)
         memory_context = ""
         if memory is not None:
@@ -283,9 +266,8 @@ async def invoke(payload, context):
         agent = get_or_create_agent()
 
         system_extra = (
-            f"The user is contacting you via {channel}. Answer only from the retrieved evidence below. "
-            "If the evidence does not answer the question, say there is insufficient evidence.\n\n"
-            f"{retrieval.context}"
+            f"The user is contacting you via {channel}. "
+            "Answer the user's request directly and be clear about uncertainty."
         )
         if memory_context:
             system_extra = f"{memory_context}\n\n{system_extra}"
@@ -309,8 +291,6 @@ async def invoke(payload, context):
         ):
             assistant_parts.append(delta)
             yield json.dumps({"type": "delta", "text": delta})
-        # Do not start a second readiness timeout after a failed retrieval in
-        # this same invocation. A subsequent invocation will retry readiness.
         if memory is not None and assistant_parts and getattr(memory, "is_ready", True):
             try:
                 await _call_memory(
@@ -322,10 +302,9 @@ async def invoke(payload, context):
                 )
             except Exception as exc:  # noqa: BLE001 - persistence must not interrupt chat
                 log.warning("AgentCore Memory turn recording failed (%s)", type(exc).__name__)
-        yield json.dumps({"type": "sources", "sources": retrieval.sources})
     except Exception as exc:  # noqa: BLE001 - return a safe user-facing response
         log.error("Agent invocation failed (%s)", type(exc).__name__)
-        yield json.dumps({"type": "delta", "text": "Não há evidência suficiente na base de conhecimento para responder a esta pergunta."})
+        yield json.dumps({"type": "delta", "text": "Não foi possível concluir a resposta no momento. Tente novamente."})
     finally:
         if sync is not None and namespace:
             try:
