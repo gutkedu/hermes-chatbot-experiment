@@ -19,6 +19,15 @@ NAT Gateway, private endpoints, ECS, Router, Cron, Observability, and Token
 Monitoring are not deployed. The latter stacks remain available for a later
 rollout through explicit CDK context flags.
 
+Runtime workspace state is persisted in the private, versioned workspace bucket
+when configured. The backend derives an opaque `ws-<sha256(runtimeSessionId)>`
+namespace from authenticated identity and the runtime validates that binding;
+the browser cannot provide it. Restore runs before the first conversation,
+periodic/final saves are best-effort, and missing S3 configuration leaves the
+runtime explicitly ephemeral. Persisted skills are bounded `skills/<name>/SKILL.md`
+Markdown instructions only—Python, shell, binary, and importable plugin files
+are ignored and never executed.
+
 ## Prerequisites
 
 - Python 3.10 or newer

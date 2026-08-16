@@ -283,14 +283,15 @@ def _init_workspace_sync() -> None:
     """Initialise workspace-sync if S3 bucket is configured."""
     bucket = os.environ.get("S3_BUCKET", "")
     namespace = os.environ.get("AGENTCORE_USER_NAMESPACE", "")
-    if not bucket or not namespace:
-        logger.info("Workspace sync disabled (S3_BUCKET or AGENTCORE_USER_NAMESPACE not set)")
+    runtime_session = os.environ.get("AGENTCORE_RUNTIME_SESSION_ID", "")
+    if not bucket or not namespace or not runtime_session:
+        logger.info("Workspace sync disabled (persistence configuration incomplete)")
         return
 
     try:
         from bridge.workspace_sync import WorkspaceSync  # noqa: WPS433
 
-        sync = WorkspaceSync()
+        sync = WorkspaceSync(runtime_session_id=runtime_session)
         sync.restore(namespace)
         sync.start_periodic_save(namespace)
         S.workspace_sync = sync

@@ -14,6 +14,7 @@ Environment variables:
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import os
 import time
@@ -52,7 +53,7 @@ def handler(event: dict, context: Any) -> dict:
         }
     }
     """
-    logger.info("Cron event: %s", json.dumps(event))
+    logger.info("Cron event received")
 
     job_id = event.get("jobId", f"cron_{int(time.time())}")
     user_id = event.get("userId", "")
@@ -64,15 +65,14 @@ def handler(event: dict, context: Any) -> dict:
         return {"status": "error", "reason": "missing userId or prompt"}
 
     # Build session ID.
-    session_id = f"{user_id}:cron:{job_id}"
-    if len(session_id) < 33:
-        session_id = session_id + ":" + "0" * (33 - len(session_id) - 1)
+    identity_digest = hashlib.sha256(user_id.encode("utf-8")).hexdigest()
+    session_id = f"cron-session-{identity_digest}"
+    runtime_user_id = f"cron-user-{identity_digest}"
 
     # Invoke AgentCore with cron action.
     payload = {
         "action": "cron",
         "userId": user_id,
-        "actorId": f"cron:{job_id}",
         "channel": "cron",
         "message": prompt,
         "jobId": job_id,
@@ -80,6 +80,7 @@ def handler(event: dict, context: Any) -> dict:
             "prompt": prompt,
             "delivery": delivery,
         },
+        "workspaceNamespace": _workspace_namespace(session_id),
     }
 
     try:
@@ -87,7 +88,7 @@ def handler(event: dict, context: Any) -> dict:
             agentRuntimeArn=RUNTIME_ARN,
             qualifier=QUALIFIER,
             runtimeSessionId=session_id,
-            runtimeUserId=f"cron:{user_id}",
+            runtimeUserId=runtime_user_id,
             payload=json.dumps(payload),
             contentType="application/json",
             accept="application/json",
@@ -95,8 +96,8 @@ def handler(event: dict, context: Any) -> dict:
         result = json.loads(response["payload"].read())
         agent_response = result.get("response", "")
     except Exception as exc:
-        logger.exception("AgentCore cron invocation failed")
-        agent_response = f"Cron job {job_id} failed: {exc}"
+        logger.error("AgentCore cron invocation failed (%s)", type(exc).__name__)
+        agent_response = ""
 
     # Deliver result to the configured channel.
     if delivery and agent_response:
@@ -120,6 +121,12 @@ def _deliver(delivery: dict, text: str, job_id: str) -> None:
         _send_slack(chat_id, f"*Cron: {job_id}*\n\n{text}")
     else:
         logger.info("No delivery channel configured — response logged only")
+
+
+def _workspace_namespace(session_id: str) -> str:
+    if not isinstance(session_id, str) or len(session_id) < 33 or "/" in session_id or ".." in session_id:
+        raise ValueError("invalid runtime session")
+    return "ws-" + hashlib.sha256(session_id.encode("utf-8")).hexdigest()
 
 
 def _send_telegram(chat_id: str, text: str) -> None:

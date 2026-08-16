@@ -37,7 +37,7 @@ def sync(tmp_workspace):
         "S3_BUCKET": "test-bucket",
         "WORKSPACE_PATH": str(tmp_workspace),
     }):
-        s = WorkspaceSync()
+        s = WorkspaceSync(runtime_session_id="session-" + "a" * 40)
         s._s3 = MagicMock()
         return s
 
@@ -124,17 +124,19 @@ def test_save_uploads_files(sync, tmp_workspace):
     """Save should upload all non-skipped files to S3."""
     # Create some test files.
     (tmp_workspace / "MEMORY.md").write_text("memory content")
-    (tmp_workspace / "skills" / "test.md").write_text("skill")
+    (tmp_workspace / "skills" / "test").mkdir()
+    (tmp_workspace / "skills" / "test" / "SKILL.md").write_text("skill")
     (tmp_workspace / "agent.log").write_text("log")  # Should be skipped.
 
-    sync.save("user123")
+    namespace = sync.namespace_for_runtime_session(sync.runtime_session_id)
+    sync.save(namespace)
 
     # Check that S3 upload was called for MEMORY.md and skills/test.md.
     uploaded_keys = [
         call.args[2] for call in sync._s3.upload_file.call_args_list
     ]
     assert any("MEMORY.md" in k for k in uploaded_keys)
-    assert any("test.md" in k for k in uploaded_keys)
+    assert any("skills/test/SKILL.md" in k for k in uploaded_keys)
     # Log file should NOT be uploaded.
     assert not any("agent.log" in k for k in uploaded_keys)
 
