@@ -46,6 +46,21 @@ logger = logging.getLogger("hermes.agentcore")
 app = BedrockAgentCoreApp()
 log = app.logger
 
+# Hermes' interactive diagnostics include prompt previews and token counts at
+# INFO.  AgentCore sends runtime logs to CloudWatch, so keep those diagnostics
+# out of the hosted runtime while retaining warnings and errors for recovery.
+_SENSITIVE_INFO_LOGGERS = (
+    "agent.turn_context",
+    "agent.conversation_loop",
+    "agent.turn_finalizer",
+)
+
+
+def _configure_safe_runtime_logging() -> None:
+    """Suppress hosted diagnostics that can contain prompt or usage data."""
+    for logger_name in _SENSITIVE_INFO_LOGGERS:
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
+
 # ---------------------------------------------------------------------------
 # Cached agent singleton
 # ---------------------------------------------------------------------------
@@ -210,6 +225,7 @@ def _skill_instructions_prompt(instructions: list[str]) -> str:
 
 def get_or_create_agent():
     """Lazy-init the full hermes-agent. Blocks on first call (~5-15s)."""
+    _configure_safe_runtime_logging()
     global _agent
     if _agent is not None:
         return _agent

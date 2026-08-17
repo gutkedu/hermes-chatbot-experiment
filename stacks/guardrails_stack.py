@@ -27,10 +27,15 @@ class HermesGuardrailsStack(Stack):
 
         # PROMPT_ATTACK requires the Standard tier. The US profile keeps
         # guardrail evaluation within the declared US geography.
-        guardrail_profile_arn = self.format_arn(
-            service="bedrock",
-            resource="guardrail-profile/us.guardrail.v1:0",
-        )
+        self.guardrail_profile_arns = [
+            self.format_arn(
+                service="bedrock",
+                region=profile_region,
+                resource="guardrail-profile/us.guardrail.v1:0",
+            )
+            for profile_region in ("us-east-1", "us-east-2", "us-west-2")
+        ]
+        guardrail_profile_arn = self.guardrail_profile_arns[0]
 
         # ---- Content filter categories -----------------------------------
 
@@ -38,9 +43,9 @@ class HermesGuardrailsStack(Stack):
             bedrock.CfnGuardrail.ContentFilterConfigProperty(
                 type=cat,
                 input_strength="MEDIUM",
-                output_strength="MEDIUM",
+                output_strength="NONE" if cat == "PROMPT_ATTACK" else "MEDIUM",
                 input_action="BLOCK",
-                output_action="BLOCK",
+                output_action="NONE" if cat == "PROMPT_ATTACK" else "BLOCK",
             )
             for cat in [
                 "SEXUAL",

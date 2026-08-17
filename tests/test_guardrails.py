@@ -113,15 +113,17 @@ def test_intervention_without_output_never_falls_back_to_raw_content():
     assert "raw blocked content" not in decision.text
 
 
-def test_guardrail_service_failure_does_not_expose_provider_error():
+def test_guardrail_service_failure_logs_only_safe_error_type(caplog):
     client = FakeGuardrailClient(error=RuntimeError("secret token and raw PII"))
     evaluator = GuardrailEvaluator(client, "guardrail-123", "1")
 
-    with pytest.raises(GuardrailServiceError) as exc_info:
+    with caplog.at_level("WARNING"), pytest.raises(GuardrailServiceError) as exc_info:
         evaluator.evaluate("hello", source="INPUT")
 
     assert str(exc_info.value) == "Guardrail evaluation failed"
     assert "secret" not in str(exc_info.value)
+    assert "RuntimeError" in caplog.text
+    assert "secret" not in caplog.text
 
 
 def test_environment_configuration_uses_explicit_region(monkeypatch):

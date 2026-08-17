@@ -80,3 +80,27 @@ test('AgentCore invocation uses derived identifiers and encoded payload', async 
     message: 'hello',
   });
 });
+
+test('AgentCore invocation forwards the derived user ID as an allowlisted custom header', async () => {
+  let request;
+  const client = {
+    send: async (command) => {
+      const handler = async (args) => args;
+      const resolved = command.middlewareStack.resolve(handler, {});
+      request = (await resolved({ request: { headers: {} } })).request;
+      return { ok: true };
+    },
+  };
+
+  await invokeAgentCore(client, {
+    agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-east-1:1:runtime/hermes',
+    runtimeSessionId: 'web-session-abc',
+    runtimeUserId: 'web-user-abc',
+    payload: { action: 'chat', message: 'hello' },
+  });
+
+  assert.equal(
+    request.headers['X-Amzn-Bedrock-AgentCore-Runtime-Custom-UserId'],
+    'web-user-abc',
+  );
+});

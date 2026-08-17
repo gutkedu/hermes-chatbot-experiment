@@ -29,6 +29,7 @@ class HermesAgentCoreStack(Stack):
         construct_id: str,
         *,
         guardrail_arn: str | None = None,
+        guardrail_profile_arns: list[str] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -145,7 +146,7 @@ class HermesAgentCoreStack(Stack):
                 iam.PolicyStatement(
                     sid="BedrockGuardrails",
                     actions=["bedrock:ApplyGuardrail"],
-                    resources=[guardrail_arn],
+                    resources=[guardrail_arn, *(guardrail_profile_arns or [])],
                 )
             )
 

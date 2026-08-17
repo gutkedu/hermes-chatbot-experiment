@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 import os
 from typing import Any
 
 import boto3
+
+log = logging.getLogger("agentcore.guardrails")
 
 
 class GuardrailServiceError(RuntimeError):
@@ -102,7 +105,8 @@ class GuardrailEvaluator:
                 source=source,
                 content=[{"text": {"text": text}}],
             )
-        except Exception:  # noqa: BLE001 - provider details stay private
+        except Exception as exc:  # noqa: BLE001 - provider details stay private
+            log.warning("Guardrail evaluation failed (%s)", type(exc).__name__)
             raise GuardrailServiceError() from None
 
         if response.get("action") != "GUARDRAIL_INTERVENED":

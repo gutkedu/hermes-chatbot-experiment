@@ -66,6 +66,11 @@ class HermesRuntimeStack(Stack):
                 "RoleArn": execution_role.role_arn,
                 "NetworkConfiguration": {"NetworkMode": "PUBLIC"},
                 "ProtocolConfiguration": "HTTP",
+                "RequestHeaderConfiguration": {
+                    "RequestHeaderAllowlist": [
+                        "X-Amzn-Bedrock-AgentCore-Runtime-Custom-UserId",
+                    ],
+                },
                 "EnvironmentVariables": environment_variables,
             },
         )
