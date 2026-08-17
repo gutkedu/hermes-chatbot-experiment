@@ -121,6 +121,9 @@ async function sendMessage(message, retry = false) {
     for await (const event of parseSse(responseChunks(response.body.getReader()))) {
       if (event.event === 'message.delta') dispatch({ type: 'DELTA', text: event.data.text ?? '' });
       if (event.event === 'message.completed') dispatch({ type: 'COMPLETED' });
+      if (event.event === 'guardrail.intervened') {
+        dispatch({ type: 'GUARDRAIL_INTERVENED', message: event.data.message ?? 'The request was blocked for safety.' });
+      }
       if (event.event === 'error') dispatch({ type: 'FAILED', message: event.data.message ?? 'Try again.' });
     }
   } catch {

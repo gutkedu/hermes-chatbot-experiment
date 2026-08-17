@@ -28,6 +28,10 @@ def _get_region() -> str:
 
 from bedrock_agentcore.runtime import BedrockAgentCoreApp  # noqa: E402
 from bridge.bedrock_compat import install_nova_bedrock_compat  # noqa: E402
+from bridge.guardrails import (  # noqa: E402
+    GuardrailEvaluator,
+    GuardrailServiceError,
+)
 from bridge.model_config import resolve_bedrock_settings  # noqa: E402
 from bridge.streaming import stream_conversation  # noqa: E402
 from bridge.memory import MemoryBridge  # noqa: E402
@@ -53,6 +57,8 @@ _workspace_runtime_session: str | None = None
 _scoped_credentials: Any | None = None
 _persistence_disabled_logged = False
 _memory_bridge: MemoryBridge | None = None
+_guardrail: GuardrailEvaluator | None = None
+_guardrail_config: tuple[str, str] | None = None
 
 
 def _runtime_session_id(context: Any) -> str:
@@ -112,6 +118,22 @@ def _memory_for_invocation(actor_id: str, session_id: str) -> MemoryBridge | Non
         _memory_bridge = None
         return None
     return _memory_bridge
+
+
+def _guardrail_for_invocation() -> GuardrailEvaluator | None:
+    """Return the configured immutable Guardrail evaluator, if enabled."""
+    global _guardrail, _guardrail_config
+
+    guardrail_id = os.environ.get("AGENTCORE_GUARDRAIL_ID", "").strip()
+    guardrail_version = os.environ.get("AGENTCORE_GUARDRAIL_VERSION", "").strip()
+    config = (guardrail_id, guardrail_version)
+    if not guardrail_id and not guardrail_version:
+        return None
+    if _guardrail is not None and _guardrail_config == config:
+        return _guardrail
+    _guardrail = GuardrailEvaluator.from_environment()
+    _guardrail_config = config
+    return _guardrail
 
 
 async def _call_memory(method: Any, *args: Any) -> Any:
@@ -256,6 +278,23 @@ async def invoke(payload, context):
             yield ""
             return
 
+        guardrail = _guardrail_for_invocation()
+        if guardrail is not None:
+            input_decision = await asyncio.to_thread(
+                guardrail.evaluate,
+                message,
+                source="INPUT",
+            )
+            if input_decision.blocked:
+                yield json.dumps({
+                    "type": "guardrail_intervened",
+                    "source": "input",
+                    "text": input_decision.text or "I can't help with that request.",
+                    "retryable": False,
+                })
+                return
+            message = input_decision.text
+
         memory = _memory_for_invocation(actor_id, session_id)
         memory_context = ""
         if memory is not None:
@@ -290,21 +329,55 @@ async def invoke(payload, context):
             conversation_history=history,
         ):
             assistant_parts.append(delta)
-            yield json.dumps({"type": "delta", "text": delta})
-        if memory is not None and assistant_parts and getattr(memory, "is_ready", True):
+            if guardrail is None:
+                yield json.dumps({"type": "delta", "text": delta})
+
+        assistant_text = "".join(assistant_parts)
+        if guardrail is not None:
+            output_decision = await asyncio.to_thread(
+                guardrail.evaluate,
+                assistant_text,
+                source="OUTPUT",
+            )
+            if output_decision.blocked:
+                yield json.dumps({
+                    "type": "guardrail_intervened",
+                    "source": "output",
+                    "text": output_decision.text or "I can't provide that response.",
+                    "retryable": False,
+                })
+                return
+            assistant_text = output_decision.text
+            if assistant_text:
+                yield json.dumps({"type": "delta", "text": assistant_text})
+
+        if memory is not None and assistant_text and getattr(memory, "is_ready", True):
             try:
                 await _call_memory(
                     memory.record_turn,
                     actor_id,
                     session_id,
                     message,
-                    "".join(assistant_parts),
+                    assistant_text,
                 )
             except Exception as exc:  # noqa: BLE001 - persistence must not interrupt chat
                 log.warning("AgentCore Memory turn recording failed (%s)", type(exc).__name__)
+    except GuardrailServiceError:  # safety must fail closed
+        log.warning("Guardrail service unavailable")
+        yield json.dumps({
+            "type": "error",
+            "code": "guardrail_unavailable",
+            "message": "The safety service is temporarily unavailable. Please try again.",
+            "retryable": True,
+        })
     except Exception as exc:  # noqa: BLE001 - return a safe user-facing response
         log.error("Agent invocation failed (%s)", type(exc).__name__)
-        yield json.dumps({"type": "delta", "text": "Não foi possível concluir a resposta no momento. Tente novamente."})
+        yield json.dumps({
+            "type": "error",
+            "code": "runtime_failure",
+            "message": "The chat service could not complete this response. Please try again.",
+            "retryable": True,
+        })
     finally:
         if sync is not None and namespace:
             try:

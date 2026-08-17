@@ -27,6 +27,8 @@ class HermesAgentCoreStack(Stack):
         self,
         scope: Construct,
         construct_id: str,
+        *,
+        guardrail_arn: str | None = None,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -137,14 +139,15 @@ class HermesAgentCoreStack(Stack):
             )
         )
 
-        # Bedrock Guardrails.
-        self.execution_role.add_to_policy(
-            iam.PolicyStatement(
-                sid="BedrockGuardrails",
-                actions=["bedrock:ApplyGuardrail"],
-                resources=[f"arn:aws:bedrock:{region}:{account}:guardrail/*"],
+        # Bedrock Guardrails — only the active immutable Guardrail is usable.
+        if guardrail_arn:
+            self.execution_role.add_to_policy(
+                iam.PolicyStatement(
+                    sid="BedrockGuardrails",
+                    actions=["bedrock:ApplyGuardrail"],
+                    resources=[guardrail_arn],
+                )
             )
-        )
 
         # AgentCore Memory — access is limited to this memory resource.
         self.execution_role.add_to_policy(

@@ -100,6 +100,48 @@ test('agent failure after a delta emits a recoverable SSE error', async () => {
   assert.doesNotMatch(body, /upstream unavailable/);
 });
 
+test('guardrail intervention is a terminal, non-retryable browser event', async () => {
+  const response = await routeRequest(event(), {
+    client: {
+      send: async () => ({
+        contentType: 'text/event-stream',
+        response: Readable.from([
+          Buffer.from('data: {"type":"guardrail_intervened","source":"input","text":"I cannot help with that request.","retryable":false}\n\n'),
+        ]),
+      }),
+    },
+    env,
+    requestId: 'req-guardrail',
+  });
+  const body = await readBody(response.body);
+
+  assert.match(body, /event: guardrail\.intervened/);
+  assert.match(body, /"source":"input"/);
+  assert.match(body, /"retryable":false/);
+  assert.doesNotMatch(body, /message\.completed/);
+});
+
+test('guardrail service failures preserve a safe retryable error code', async () => {
+  const response = await routeRequest(event(), {
+    client: {
+      send: async () => ({
+        contentType: 'text/event-stream',
+        response: Readable.from([
+          Buffer.from('data: {"type":"error","code":"guardrail_unavailable","message":"The safety service is temporarily unavailable. Please try again.","retryable":true}\n\n'),
+        ]),
+      }),
+    },
+    env,
+    requestId: 'req-guardrail-failure',
+  });
+  const body = await readBody(response.body);
+
+  assert.match(body, /event: error/);
+  assert.match(body, /"code":"guardrail_unavailable"/);
+  assert.match(body, /"retryable":true/);
+  assert.doesNotMatch(body, /message\.completed/);
+});
+
 test('config response contains public deployment values only', async () => {
   const response = await routeRequest({ path: '/config', httpMethod: 'GET' }, {
     client: { send: async () => { throw new Error('must not invoke'); } },

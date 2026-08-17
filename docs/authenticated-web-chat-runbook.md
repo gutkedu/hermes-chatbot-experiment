@@ -23,6 +23,10 @@ authorized-environment check.
    Phase 3 deploys only the `hermes-agentcore-web` stack. It prints the
    CloudFront site URL, streaming API URL, Cognito domain, and public web
    client ID.
+
+   Phase 1 also deploys `hermes-agentcore-guardrails`. It creates the generic
+   Standard-tier content policy and publishes a numbered immutable version;
+   the runtime receives that exact Guardrail ID/version and never uses `DRAFT`.
 3. Create two test users in the retained user pool. The pool ID is the
    `UserPoolId` output of `hermes-agentcore-security`:
 
@@ -53,6 +57,39 @@ document citations or retrieval-specific status.
 
 The BFF derives opaque AgentCore session and user IDs from the Cognito `iss`
 and `sub` claims. It never accepts a browser-provided session identifier.
+
+## Guardrail policy and operations
+
+The active policy is intentionally generic. Harmful content and prompt attacks
+are blocked in both directions. Common PII (`EMAIL`, `PHONE`, `NAME`,
+`ADDRESS`, `USERNAME`, and `IP_ADDRESS`) is anonymized in input and output.
+Passwords, AWS access keys/secrets, Social Security numbers, and payment card
+numbers are blocked. A blocked input is stopped before Memory or model work;
+an output is accumulated and checked before any browser delta is emitted.
+
+Guardrail intervention is a terminal `guardrail.intervened` browser event and
+does not offer retry for the same content. Guardrail service failures are a
+separate retryable `guardrail_unavailable` error. Provider errors and other
+runtime failures use a generic `runtime_failure` code; raw prompts, outputs,
+tokens, credentials, detected values, and AWS exception text are not exposed.
+
+To inspect the active policy without printing content values, use the stack
+outputs and the AWS control plane:
+
+```bash
+aws cloudformation describe-stacks \
+  --stack-name hermes-agentcore-guardrails \
+  --query 'Stacks[0].Outputs[?OutputKey==`GuardrailId` || OutputKey==`GuardrailVersionOutput`].[OutputKey,OutputValue]' \
+  --output table
+```
+
+Tune the policy by changing `stacks/guardrails_stack.py`, deploy it, and verify
+the new numbered `GuardrailVersionOutput` before the runtime rollout. Treat
+each numbered version as immutable; do not replace the runtime environment
+with `DRAFT`. Record expected false positives (for example, support tickets
+that contain contact details) and adjust only the relevant PII action or
+filter strength. Re-run the credential-free tests and the authorized web
+smoke check after each policy change.
 
 ## Workspace persistence and skills
 

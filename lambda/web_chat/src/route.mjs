@@ -33,6 +33,21 @@ function errorResponse(error, env, requestId) {
   return jsonResponse(statusCode, { error: message, requestId }, env, requestId);
 }
 
+function safeRuntimeError(code) {
+  if (code === 'guardrail_unavailable') {
+    return {
+      code,
+      message: 'The safety service is temporarily unavailable. Please try again.',
+      retryable: true,
+    };
+  }
+  return {
+    code: 'runtime_failure',
+    message: 'The chat service could not complete this response. Please try again.',
+    retryable: true,
+  };
+}
+
 function claimsFromEvent(event) {
   return event?.requestContext?.authorizer?.claims
     ?? event?.requestContext?.authorizer
@@ -65,7 +80,26 @@ async function* chatBody({ client, env, requestId, message, principal }) {
       output.contentType ?? '',
     )) {
       if (typeof event === 'string' && event) yield encodeSse('message.delta', { text: event });
-      if (event.type === 'delta' && event.text) yield encodeSse('message.delta', { text: event.text });
+      if (typeof event !== 'object' || !event) continue;
+      if (event.type === 'delta' && event.text) {
+        yield encodeSse('message.delta', { text: event.text });
+      }
+      if (event.type === 'guardrail_intervened') {
+        const message = event.source === 'output'
+          ? "I can't provide that response."
+          : "I can't help with that request.";
+        yield encodeSse('guardrail.intervened', {
+          source: event.source === 'output' ? 'output' : 'input',
+          message,
+          retryable: false,
+          requestId,
+        });
+        return;
+      }
+      if (event.type === 'error') {
+        yield encodeSse('error', { ...safeRuntimeError(event.code), requestId });
+        return;
+      }
     }
     yield encodeSse('message.completed', { requestId });
   } catch (error) {

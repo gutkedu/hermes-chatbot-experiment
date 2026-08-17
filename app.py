@@ -4,9 +4,9 @@
 Instantiates the web-only stacks in dependency order, including the explicit
 AgentCore runtime.
 
-Router, cron, observability, token monitoring, and guardrails remain
-available as opt-in stacks through CDK context flags, but are disabled by
-default.
+Router, cron, observability, and token monitoring remain available as opt-in
+stacks through CDK context flags. Guardrails are enabled by default for the
+active deployment.
 """
 
 from __future__ import annotations
@@ -43,21 +43,42 @@ alarm_email = app.node.try_get_context("alarm_email") or ""
 
 security_stack = HermesSecurityStack(app, f"{project}-security")
 
-if context_bool("enable_guardrails"):
-    HermesGuardrailsStack(app, f"{project}-guardrails")
+guardrails_stack = None
+if context_bool("enable_guardrails", default=True):
+    guardrails_stack = HermesGuardrailsStack(app, f"{project}-guardrails")
 
 agentcore_stack = HermesAgentCoreStack(
     app,
     f"{project}-agentcore",
+    guardrail_arn=(
+        guardrails_stack.guardrail.attr_guardrail_arn
+        if guardrails_stack is not None
+        else None
+    ),
 )
+if guardrails_stack is not None:
+    agentcore_stack.add_dependency(guardrails_stack)
+
 runtime_stack = HermesRuntimeStack(
     app,
     f"{project}-runtime",
     execution_role=agentcore_stack.execution_role,
     workspace_bucket_name=agentcore_stack.bucket.bucket_name,
     memory_id=agentcore_stack.memory.get_att("MemoryId").to_string(),
+    guardrail_id=(
+        guardrails_stack.guardrail.attr_guardrail_id
+        if guardrails_stack is not None
+        else None
+    ),
+    guardrail_version=(
+        guardrails_stack.guardrail_version.attr_version
+        if guardrails_stack is not None
+        else None
+    ),
 )
 runtime_stack.add_dependency(agentcore_stack)
+if guardrails_stack is not None:
+    runtime_stack.add_dependency(guardrails_stack)
 
 enable_token_monitoring = context_bool("enable_token_monitoring")
 enable_observability = enable_token_monitoring or context_bool("enable_observability")

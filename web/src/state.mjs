@@ -33,6 +33,8 @@ export function reduce(state, action) {
     }
     case 'COMPLETED':
       return { ...state, status: 'ready', pendingMessage: null };
+    case 'GUARDRAIL_INTERVENED':
+      return { ...state, status: 'ready', pendingMessage: null, error: action.message };
     case 'FAILED':
       if (action.statusCode === 401) return { ...state, ...initialState };
       return { ...state, status: 'error', error: action.message };

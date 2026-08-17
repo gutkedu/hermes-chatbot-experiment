@@ -45,6 +45,17 @@ test('quoted AgentCore delta envelopes are decoded before routing', async () => 
   ]);
 });
 
+test('guardrail and error envelopes remain structured events', async () => {
+  const body = Readable.from([
+    Buffer.from('data: {"type":"guardrail_intervened","source":"input","text":"safe"}\n\n'),
+    Buffer.from('data: {"type":"error","code":"guardrail_unavailable"}\n\n'),
+  ]);
+  assert.deepEqual(await collect(parseAgentCoreStream(body, 'text/event-stream')), [
+    { type: 'guardrail_intervened', source: 'input', text: 'safe' },
+    { type: 'error', code: 'guardrail_unavailable' },
+  ]);
+});
+
 test('JSON AgentCore fallback yields one response', async () => {
   const body = Readable.from([Buffer.from('{"response":"complete"}')]);
   assert.deepEqual(await collect(parseAgentCoreStream(body, 'application/json')), ['complete']);
