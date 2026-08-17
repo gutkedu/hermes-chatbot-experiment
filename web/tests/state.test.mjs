@@ -43,3 +43,17 @@ test('401 signs out and retry reuses the pending message', () => {
   assert.equal(state.messages.length, 2);
   assert.equal(state.pendingMessage, 'retry me');
 });
+
+test('guardrail intervention ends the turn without offering a retry', () => {
+  let state = reduce({ ...initialState, status: 'ready', accessToken: 'token' }, {
+    type: 'SEND_STARTED', message: 'unsafe request',
+  });
+  state = reduce(state, {
+    type: 'GUARDRAIL_INTERVENED',
+    message: "I can't help with that request.",
+  });
+
+  assert.equal(state.status, 'ready');
+  assert.equal(state.pendingMessage, null);
+  assert.equal(state.error, "I can't help with that request.");
+});

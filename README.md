@@ -12,9 +12,11 @@ The default deployment is web-only:
 
 `CloudFront/S3 → API Gateway → Lambda → AgentCore Runtime (PUBLIC) → Bedrock`
 
-The default CDK synthesis contains the Cognito security stack, AgentCore base
-role, workspace bucket, persistent Memory, explicit AgentCore runtime, and the
-authenticated web/API stack. The runtime answers directly through the
+The default CDK synthesis contains the Cognito security stack, a versioned
+Amazon Bedrock Guardrail, AgentCore base role, workspace bucket, persistent
+Memory, explicit AgentCore runtime, and the authenticated web/API stack. The
+runtime evaluates user input before Memory/model work and evaluates the full
+model response before it reaches the browser. It answers directly through the
 configured Bedrock model; it does not provision or query a Knowledge Base,
 vector store, or retrieval service. VPC,
 NAT Gateway, private endpoints, ECS, Router, Cron, Observability, and Token

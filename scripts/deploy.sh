@@ -70,6 +70,7 @@ phase1() {
     fi
 
     $CDK deploy \
+        "${PROJECT_NAME}-guardrails" \
         "${PROJECT_NAME}-agentcore" \
         "${PROJECT_NAME}-security" \
         --require-approval never

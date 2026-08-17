@@ -43,7 +43,9 @@ function eventFromData(value) {
     const nested = decodeData(value);
     if (nested !== value) return eventFromData(nested);
   }
-  if (value && typeof value === 'object' && value.type === 'delta') return value;
+  if (value && typeof value === 'object' && ['delta', 'guardrail_intervened', 'error'].includes(value.type)) {
+    return value;
+  }
   const text = textFromData(value);
   return text || null;
 }

@@ -1,7 +1,7 @@
 """Guardrails stack — Bedrock Guardrails for content safety.
 
-Configures content filtering and PII redaction applied to model responses
-before they are delivered to users.
+Configures the generic safety policy used before model input and output reach
+the Hermes runtime boundary.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from constructs import Construct
 
 
 class HermesGuardrailsStack(Stack):
-    """Bedrock Guardrails: content filter + PII anonymisation."""
+    """Bedrock Guardrails: Standard content safety + sensitive information."""
 
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -25,6 +25,13 @@ class HermesGuardrailsStack(Stack):
         if enable is False:
             return
 
+        # PROMPT_ATTACK requires the Standard tier. The US profile keeps
+        # guardrail evaluation within the declared US geography.
+        guardrail_profile_arn = self.format_arn(
+            service="bedrock",
+            resource="guardrail-profile/us.guardrail.v1:0",
+        )
+
         # ---- Content filter categories -----------------------------------
 
         filters = [
@@ -32,6 +39,8 @@ class HermesGuardrailsStack(Stack):
                 type=cat,
                 input_strength="MEDIUM",
                 output_strength="MEDIUM",
+                input_action="BLOCK",
+                output_action="BLOCK",
             )
             for cat in [
                 "SEXUAL",
@@ -43,18 +52,39 @@ class HermesGuardrailsStack(Stack):
             ]
         ]
 
-        # ---- PII entities to anonymise -----------------------------------
+        # ---- PII and secrets ---------------------------------------------
 
         pii_entities = [
-            bedrock.CfnGuardrail.PiiEntityConfigProperty(type=t, action="ANONYMIZE")
+            bedrock.CfnGuardrail.PiiEntityConfigProperty(
+                type=t,
+                action="ANONYMIZE",
+                input_action="ANONYMIZE",
+                output_action="ANONYMIZE",
+            )
             for t in [
                 "EMAIL",
                 "PHONE",
                 "NAME",
+                "ADDRESS",
+                "USERNAME",
+                "IP_ADDRESS",
+            ]
+        ]
+        pii_entities.extend(
+            bedrock.CfnGuardrail.PiiEntityConfigProperty(
+                type=t,
+                action="BLOCK",
+                input_action="BLOCK",
+                output_action="BLOCK",
+            )
+            for t in [
+                "PASSWORD",
+                "AWS_ACCESS_KEY",
+                "AWS_SECRET_KEY",
                 "US_SOCIAL_SECURITY_NUMBER",
                 "CREDIT_DEBIT_CARD_NUMBER",
             ]
-        ]
+        )
 
         # ---- Guardrail resource ------------------------------------------
 
@@ -67,6 +97,12 @@ class HermesGuardrailsStack(Stack):
             blocked_outputs_messaging="I can't provide that response.",
             content_policy_config=bedrock.CfnGuardrail.ContentPolicyConfigProperty(
                 filters_config=filters,
+                content_filters_tier_config=bedrock.CfnGuardrail.ContentFiltersTierConfigProperty(
+                    tier_name="STANDARD",
+                ),
+            ),
+            cross_region_config=bedrock.CfnGuardrail.GuardrailCrossRegionConfigProperty(
+                guardrail_profile_arn=guardrail_profile_arn,
             ),
             sensitive_information_policy_config=bedrock.CfnGuardrail.SensitiveInformationPolicyConfigProperty(
                 pii_entities_config=pii_entities,

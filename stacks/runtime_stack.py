@@ -11,7 +11,18 @@ from constructs import Construct
 
 
 class HermesRuntimeStack(Stack):
-    def __init__(self, scope: Construct, construct_id: str, *, execution_role: iam.IRole, workspace_bucket_name: str, memory_id: str, **kwargs) -> None:
+    def __init__(
+        self,
+        scope: Construct,
+        construct_id: str,
+        *,
+        execution_role: iam.IRole,
+        workspace_bucket_name: str,
+        memory_id: str,
+        guardrail_id: str | None = None,
+        guardrail_version: str | None = None,
+        **kwargs,
+    ) -> None:
         super().__init__(scope, construct_id, **kwargs)
         project = self.node.try_get_context("project_name") or "hermes-agentcore"
         image = ecr_assets.DockerImageAsset(self, "HermesImage", directory=str(Path(__file__).parents[1] / "app" / "hermes"), platform=ecr_assets.Platform.LINUX_ARM64)
@@ -32,6 +43,18 @@ class HermesRuntimeStack(Stack):
                 ),
             ],
         )
+        environment_variables = {
+            "AGENTCORE_MEMORY_ID": memory_id,
+            "S3_BUCKET": workspace_bucket_name,
+            "EXECUTION_ROLE_ARN": execution_role.role_arn,
+            "AWS_DEFAULT_REGION": Stack.of(self).region,
+        }
+        if guardrail_id and guardrail_version:
+            environment_variables.update({
+                "AGENTCORE_GUARDRAIL_ID": guardrail_id,
+                "AGENTCORE_GUARDRAIL_VERSION": guardrail_version,
+            })
+
         self.runtime = CfnResource(
             self,
             "Runtime",
@@ -43,12 +66,7 @@ class HermesRuntimeStack(Stack):
                 "RoleArn": execution_role.role_arn,
                 "NetworkConfiguration": {"NetworkMode": "PUBLIC"},
                 "ProtocolConfiguration": "HTTP",
-                "EnvironmentVariables": {
-                    "AGENTCORE_MEMORY_ID": memory_id,
-                    "S3_BUCKET": workspace_bucket_name,
-                    "EXECUTION_ROLE_ARN": execution_role.role_arn,
-                    "AWS_DEFAULT_REGION": Stack.of(self).region,
-                },
+                "EnvironmentVariables": environment_variables,
             },
         )
         self.runtime.add_dependency(image_pull_policy.node.default_child)

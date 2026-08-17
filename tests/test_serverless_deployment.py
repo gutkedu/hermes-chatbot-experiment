@@ -10,6 +10,7 @@ from aws_cdk import App
 from aws_cdk.assertions import Match, Template
 
 from stacks.agentcore_stack import HermesAgentCoreStack
+from stacks.guardrails_stack import HermesGuardrailsStack
 from stacks.security_stack import HermesSecurityStack
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,13 +53,37 @@ def _synth_stack_names(*context: tuple[str, str]) -> set[str]:
         }
 
 
-def test_default_synthesis_is_web_only() -> None:
+def test_default_synthesis_includes_the_active_guardrail() -> None:
     assert _synth_stack_names() == {
         "hermes-agentcore-security",
+        "hermes-agentcore-guardrails",
         "hermes-agentcore-agentcore",
         "hermes-agentcore-runtime",
         "hermes-agentcore-web",
     }
+
+
+def test_guardrails_stack_publishes_standard_policy_and_immutable_version() -> None:
+    app = App(context={"project_name": "hermes-test"})
+    template = Template.from_stack(HermesGuardrailsStack(app, "Guardrails"))
+
+    template.resource_count_is("AWS::Bedrock::Guardrail", 1)
+    template.resource_count_is("AWS::Bedrock::GuardrailVersion", 1)
+    guardrail = template.find_resources("AWS::Bedrock::Guardrail")
+    properties = next(iter(guardrail.values()))["Properties"]
+    assert properties["ContentPolicyConfig"]["ContentFiltersTierConfig"] == {"TierName": "STANDARD"}
+    assert properties["CrossRegionConfig"]["GuardrailProfileArn"]["Fn::Join"]
+    assert {item["Type"] for item in properties["ContentPolicyConfig"]["FiltersConfig"]} == {
+        "HATE",
+        "INSULTS",
+        "MISCONDUCT",
+        "PROMPT_ATTACK",
+        "SEXUAL",
+        "VIOLENCE",
+    }
+    outputs = template.to_json()["Outputs"]
+    assert "GuardrailId" in outputs
+    assert "GuardrailVersionOutput" in outputs
 
 
 def test_security_stack_contains_cognito_but_no_dedicated_crypto_or_secrets() -> None:
@@ -159,6 +184,24 @@ def test_runtime_receives_workspace_bucket_and_execution_role_configuration() ->
     assert "S3_BUCKET" in variables
     assert "EXECUTION_ROLE_ARN" in variables
     assert "AGENTCORE_MEMORY_ID" in variables
+    assert "AGENTCORE_GUARDRAIL_ID" in variables
+    assert "AGENTCORE_GUARDRAIL_VERSION" in variables
+
+
+def test_guardrail_iam_is_scoped_to_the_created_guardrail() -> None:
+    app = App(context={"project_name": "hermes-test"})
+    guardrails = HermesGuardrailsStack(app, "Guardrails")
+    template = Template.from_stack(
+        HermesAgentCoreStack(
+            app,
+            "AgentCore",
+            guardrail_arn=guardrails.guardrail.attr_guardrail_arn,
+        )
+    )
+    policies = json.dumps(template.find_resources("AWS::IAM::Policy"))
+
+    assert "bedrock:ApplyGuardrail" in policies
+    assert "guardrail/*" not in policies
 
 
 def test_token_monitoring_remains_synthesizable_when_enabled() -> None:
