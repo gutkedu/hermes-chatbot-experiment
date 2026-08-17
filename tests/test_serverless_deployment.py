@@ -81,6 +81,12 @@ def test_guardrails_stack_publishes_standard_policy_and_immutable_version() -> N
         "SEXUAL",
         "VIOLENCE",
     }
+    filters = {
+        item["Type"]: item
+        for item in properties["ContentPolicyConfig"]["FiltersConfig"]
+    }
+    assert filters["PROMPT_ATTACK"]["OutputStrength"] == "NONE"
+    assert filters["PROMPT_ATTACK"]["OutputAction"] == "NONE"
     outputs = template.to_json()["Outputs"]
     assert "GuardrailId" in outputs
     assert "GuardrailVersionOutput" in outputs
@@ -186,6 +192,11 @@ def test_runtime_receives_workspace_bucket_and_execution_role_configuration() ->
     assert "AGENTCORE_MEMORY_ID" in variables
     assert "AGENTCORE_GUARDRAIL_ID" in variables
     assert "AGENTCORE_GUARDRAIL_VERSION" in variables
+    assert runtime["Properties"]["RequestHeaderConfiguration"] == {
+        "RequestHeaderAllowlist": [
+            "X-Amzn-Bedrock-AgentCore-Runtime-Custom-UserId",
+        ],
+    }
 
 
 def test_guardrail_iam_is_scoped_to_the_created_guardrail() -> None:
@@ -196,11 +207,13 @@ def test_guardrail_iam_is_scoped_to_the_created_guardrail() -> None:
             app,
             "AgentCore",
             guardrail_arn=guardrails.guardrail.attr_guardrail_arn,
+            guardrail_profile_arns=guardrails.guardrail_profile_arns,
         )
     )
     policies = json.dumps(template.find_resources("AWS::IAM::Policy"))
 
     assert "bedrock:ApplyGuardrail" in policies
+    assert policies.count("guardrail-profile/us.guardrail.v1:0") == 3
     assert "guardrail/*" not in policies
 
 
@@ -245,7 +258,8 @@ def test_deploy_script_is_web_only() -> None:
     assert '"${PROJECT_NAME}-agentcore"' in script
     assert '"${PROJECT_NAME}-runtime"' in script
     assert '"${PROJECT_NAME}-web"' in script
-    assert "--exclude='memory.py'" in script
+    assert "Syncing bridge/ into app/hermes/bridge/" not in script
+    assert "rsync -a --delete" not in script
 
     phase1 = script.split("phase1()", 1)[1].split("phase2()", 1)[0]
     assert phase1.index('"${PROJECT_NAME}-agentcore"') < phase1.index(

@@ -101,5 +101,19 @@ export async function invokeAgentCore(client, input) {
     payload: Buffer.from(JSON.stringify(input.payload), 'utf8'),
   };
   if (input.qualifier) commandInput.qualifier = input.qualifier;
-  return client.send(new InvokeAgentRuntimeCommand(commandInput));
+  const command = new InvokeAgentRuntimeCommand(commandInput);
+  if (input.runtimeUserId) {
+    command.middlewareStack.add(
+      (next) => async (args) => {
+        args.request.headers['X-Amzn-Bedrock-AgentCore-Runtime-Custom-UserId'] = input.runtimeUserId;
+        return next(args);
+      },
+      {
+        name: 'forwardRuntimeUserId',
+        step: 'build',
+        priority: 'high',
+      },
+    );
+  }
+  return client.send(command);
 }

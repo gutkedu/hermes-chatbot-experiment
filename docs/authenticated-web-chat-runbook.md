@@ -48,6 +48,30 @@ authorized-environment check.
    The assistant bubble should appear immediately and grow as
    `message.delta` SSE events arrive.
 
+## Region, model access, and cost envelope
+
+The demonstrated deployment is pinned to `us-east-1` and uses
+`amazon.nova-lite-v1:0` through Bedrock Converse. Enable access to that model
+in the account before deployment. The Standard Guardrail uses the US
+cross-Region profile; its execution role therefore allows `ApplyGuardrail` on
+the guardrail plus the `us-east-1`, `us-east-2`, and `us-west-2` profile ARNs.
+See the [cross-Region Guardrail permission guide](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrail-profiles-permissions.html)
+and [current Bedrock pricing](https://aws.amazon.com/bedrock/pricing/) before
+changing region, model, or policy tier.
+
+This is a usage-priced experiment: model tokens, Lambda/API Gateway, S3/ECR,
+CloudWatch, Guardrail text units, Memory events/records/retrievals, and
+AgentCore Runtime CPU/memory are separate line items. For orientation only,
+the current AgentCore Runtime rates are `$0.0895/vCPU-hour` and
+`$0.00945/GB-hour`; a conservative 60-second, 1-vCPU/1-GB fully-active
+example is about `$0.00165` before model and other service charges. A short
+one-kilobyte input plus one-kilobyte output consumes two Guardrail evaluations
+and is normally well below one cent; actual billing is based on text units and
+the configured safeguards. Use Cost Explorer after a smoke run rather than
+treating these figures as a quote. See the
+[AgentCore pricing page](https://aws.amazon.com/bedrock/agentcore/pricing/)
+for live rates and billing rules.
+
 ## Verify authentication and streaming
 
 After sign-in, send a normal support question through the authenticated chat.
@@ -56,7 +80,10 @@ arrive as incremental `message.delta` events. The browser contract contains no
 document citations or retrieval-specific status.
 
 The BFF derives opaque AgentCore session and user IDs from the Cognito `iss`
-and `sub` claims. It never accepts a browser-provided session identifier.
+and `sub` claims. It never accepts a browser-provided session identifier. It
+passes the derived user ID as the allowlisted
+`X-Amzn-Bedrock-AgentCore-Runtime-Custom-UserId` header; the runtime uses that
+header for the Memory actor and ignores the payload's untrusted `userId`.
 
 ## Guardrail policy and operations
 
@@ -105,6 +132,10 @@ after each invocation, and attempts one final synchronous save during
 shutdown. Individual S3 download/upload failures are logged as safe error
 types and do not stop the remaining files or the conversation. Logs never
 include file contents, prompts, model output, tokens, or credentials.
+The hosted runtime also raises the log level for Hermes' conversation-turn,
+API-usage, and turn-finalizer diagnostics because their INFO messages can
+contain prompt previews or token counts; warnings and errors remain available
+for operations.
 
 Without `S3_BUCKET`, the runtime explicitly operates with an ephemeral
 workspace. With persistence enabled, a missing, malformed, traversal-like, or
@@ -164,6 +195,14 @@ records. See the [official Memory SDK guide](https://docs.aws.amazon.com/bedrock
 and [namespace guidance](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/specify-long-term-memory-organization.html)
 for the service-level contracts.
 
+Relevant service limits include a 33-character minimum runtime session ID,
+100 MB invocation payloads, 10 MB streaming chunks, and up to 1,000 active
+sessions in `us-east-1` (subject to account quotas). This stack keeps Memory
+events for 90 days and caps persisted skill Markdown at 64 KiB. See the
+[AgentCore quotas](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/bedrock-agentcore-limits.html)
+and [Runtime configuration reference](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime.html)
+for current service limits.
+
 Persisted skills are instructions only. The only accepted skill file is
 `skills/<name>/SKILL.md`, where `<name>` is a bounded opaque-safe directory
 name and the Markdown is valid bounded UTF-8 text. Python, shell, binary, and
@@ -195,7 +234,14 @@ corresponding `/aws/lambda/hermes-agentcore-web-chat` log stream. Logs contain
 request metadata and safe error details only; they must not contain raw
 messages, prompts, model output, Cognito subjects, or bearer tokens.
 
-## Teardown
+## Rollback and teardown
+
+To roll back only the application artifact, redeploy the previous image and
+runtime environment with the normal CDK deployment flow; keep the immutable
+Guardrail version and Memory ID unchanged. To remove the experiment, preview
+the stack order first and then use the teardown below. The retained S3 bucket
+and Cognito pool are deliberate recovery points and must be removed separately
+only under explicit account change control.
 
 Preview the complete stack order before making changes:
 

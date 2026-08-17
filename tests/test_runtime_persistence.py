@@ -71,6 +71,14 @@ def _collect(generator) -> list[str]:
     return asyncio.run(collect_async())
 
 
+def test_runtime_logging_policy_suppresses_prompt_and_token_diagnostics(runtime):
+    runtime._configure_safe_runtime_logging()
+
+    assert logging.getLogger("agent.turn_context").level == logging.WARNING
+    assert logging.getLogger("agent.conversation_loop").level == logging.WARNING
+    assert logging.getLogger("agent.turn_finalizer").level == logging.WARNING
+
+
 def test_restore_precedes_agent_creation_and_skills_are_delimited(runtime, monkeypatch, tmp_path: Path):
     events: list[str] = []
     sync = _Sync(events, tmp_path)

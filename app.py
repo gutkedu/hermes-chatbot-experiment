@@ -55,6 +55,11 @@ agentcore_stack = HermesAgentCoreStack(
         if guardrails_stack is not None
         else None
     ),
+    guardrail_profile_arns=(
+        guardrails_stack.guardrail_profile_arns
+        if guardrails_stack is not None
+        else None
+    ),
 )
 if guardrails_stack is not None:
     agentcore_stack.add_dependency(guardrails_stack)
